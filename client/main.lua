@@ -52,6 +52,33 @@ do
     end
 end
 
+-- The catalog above is what this SERVER has; what this PLAYER may see also depends on the job they
+-- hold, which only sd-phone's server knows. Asked on every open, so switching job on a multijob
+-- server puts the right terminal on the home screen with no event to miss.
+--
+-- The callback is sd-phone's, called directly rather than through the companion seam: this decides
+-- what goes INTO our open payload, so it has to be answered before the frame exists to forward
+-- anything. A server without it (an older sd-phone) leaves the catalog untouched.
+---@return table[] apps
+---@return string[] dock
+local function visibleApps()
+    local ok, hidden = pcall(lib.callback.await, 'sd-phone:server:apps:hidden', false)
+    if not ok or type(hidden) ~= 'table' or #hidden == 0 then return ENABLED_APPS, ENABLED_DOCK end
+
+    local drop = {}
+    for i = 1, #hidden do drop[hidden[i]] = true end
+
+    local apps, dock = {}, {}
+    for i = 1, #ENABLED_APPS do
+        local app = ENABLED_APPS[i]
+        if not drop[app.id] then apps[#apps + 1] = app end
+    end
+    for i = 1, #ENABLED_DOCK do
+        if not drop[ENABLED_DOCK[i]] then dock[#dock + 1] = ENABLED_DOCK[i] end
+    end
+    return apps, dock
+end
+
 -- Number display config for the NUI. Format keys are stringified deliberately: a Lua table whose
 -- integer keys run contiguously from 1 encodes as a JSON ARRAY, which would land in the UI
 -- off-by-one, so this guarantees an object either way. Same treatment as sd-phone's.
@@ -438,6 +465,7 @@ end)
 ---always disabled - a tablet has no tray, and SIM mode refuses to open one at all.
 ---@return table
 local function openPayload()
+    local apps, dock = visibleApps()
     return {
         locale              = config.Locale,
         locked              = tabletState.locked,
@@ -449,8 +477,8 @@ local function openPayload()
         bluetoothConfigured = bluetoothConfigured(),
         use24h              = cfg.Lockscreen.Use24Hour,
         showDate            = cfg.Lockscreen.ShowDate,
-        dock                = ENABLED_DOCK,
-        apps                = ENABLED_APPS,
+        dock                = dock,
+        apps                = apps,
         mailDomain          = cfg.Mail.Domain,
         number              = NUMBER_FORMAT,
         wallpaper           = {

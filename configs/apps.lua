@@ -31,13 +31,19 @@ return {
     -- device's grid, in the order defined below. `route` is the SPA path the React app navigates
     -- to when the icon is tapped.
     Apps = {
-        -- The police terminal, tablet-only: sd-phone's catalog carries the same id with
-        -- `enabled = false` so no phone ever shows it.
+        -- The two terminals, tablet-only: sd-phone's catalog carries both ids with
+        -- `enabled = false` so no phone ever shows them.
         --
-        -- Listing it here only puts the icon on the home screen. The terminal itself is
-        -- sd-phone's and is OFF by default, so until you set `Enabled = true` in sd-phone's
-        -- configs/mdt.lua this opens to a locked screen. See README step 5.
+        -- Listing them here only says the tablet HAS them. Which one a player sees is decided
+        -- per open by their framework job, from the departments in sd-phone's configs/mdt.lua:
+        -- police jobs get `mdt`, an `ems` department gets `emsmdt`, and anyone else gets
+        -- neither icon rather than one that refuses them. Adding a department there is all it
+        -- takes; there is no job list to keep in sync here.
+        --
+        -- The terminal itself is sd-phone's and is OFF by default, so until you set
+        -- `Enabled = true` in sd-phone's configs/mdt.lua both icons stay hidden. See README step 5.
         { id = 'mdt', label = 'MDT', icon = 'mdt', route = '/mdt', accent = '#1D4ED8', base = true, enabled = true },
+        { id = 'emsmdt', label = 'EMS', icon = 'emsmdt', route = '/emsmdt', accent = '#E11D48', base = true, enabled = true },
         { id = 'messages', label = 'Messages', icon = 'messages', route = '/messages', accent = '#34c759', base = true, enabled = true },
         { id = 'mail', label = 'Mail', icon = 'mail', route = '/mail', accent = '#0a84ff', base = true, enabled = true },
         { id = 'maps', label = 'Maps', icon = 'maps', route = '/maps', accent = '#f0c43a', base = true, enabled = true },
