@@ -4,9 +4,9 @@
     "version": "0.1.0",
     "type": "module",
     "scripts": {
-        "sync:sdk": "bun -e \"await Bun.write('public/components.js', Bun.file('../../sd-phone/web/public/components.js'))\"",
-        "dev": "bun run sync:sdk && vite",
-        "build": "bun run sync:sdk && tsc --noEmit && vite build",
+        "sync:sdk": "node -e \"require('fs').copyFileSync('../../sd-phone/web/public/components.js','public/components.js')\"",
+        "dev": "npm run sync:sdk && vite",
+        "build": "npm run sync:sdk && tsc --noEmit && vite build",
         "preview": "vite preview"
     },
     "dependencies": {

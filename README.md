@@ -45,6 +45,7 @@ the other.
 | **Shared with the phone** | Messages, contacts, mail, notes, photos, app accounts and logins, wallet, settings, passcode and Face Unlock, installed apps, notifications, badges |
 | **The tablet's own** | Home screen arrangement, and the device itself: item, keybind, hold pose and prop |
 | **Not available** | Voice calls, the payphone UI, the admin panel, the first-run setup wizard, the flashlight |
+| **Tablet-only** | The **MDT**, a police terminal laid out for this screen. sd-phone ships it hidden and its backend switched off, so it costs a phone-only server nothing; see step 5 below. |
 
 ## Why no calls
 
@@ -187,6 +188,26 @@ qb-inventory, ps-inventory, lj-inventory. The same backend list sd-phone support
 ### 4. Open it
 
 Press <kbd>F2</kbd>, or use the `tablet` item.
+
+### 5. Turn on the MDT (optional)
+
+The tablet ships with the **MDT**, sd-phone's police terminal. Its icon is on the home screen from
+the start, but its backend lives in sd-phone and is **off by default**, so out of the box the app
+opens to a locked screen and the server console says so once.
+
+In **sd-phone**, `configs/mdt.lua`:
+
+```lua
+Enabled = true,
+```
+
+Restart sd-phone and the MDT builds its tables on the next boot. The rest of that file is where you
+declare which jobs get a terminal, what each rank may do, and the penal code, all of it enforced
+server-side.
+
+Leave it off if nobody on your server needs a terminal. A disabled MDT creates no tables, seeds
+nothing and runs no threads, which is the whole reason the switch exists: the terminal is the one
+app that only makes sense on a tablet, and a phone-only server should not pay for it.
 
 ## Configuration
 
