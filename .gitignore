@@ -1,0 +1,10 @@
+node_modules/
+web/node_modules/
+
+# The built NUI. Shipped in releases, never committed - same policy as sd-phone.
+web/build/
+
+# Copied from sd-phone by `bun run sync:sdk`. Committing it forks the SDK and lets it drift.
+web/public/components.js
+
+.playwright-mcp/

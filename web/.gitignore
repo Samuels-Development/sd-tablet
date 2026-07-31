@@ -1,0 +1,5 @@
+node_modules/
+build/
+
+# Copied from sd-phone by `bun run sync:sdk`. Committing it forks the SDK and lets it drift.
+public/components.js

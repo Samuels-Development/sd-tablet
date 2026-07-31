@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "target": "ES2020",
+        "useDefineForClassFields": true,
+        "lib": ["ES2020", "DOM", "DOM.Iterable"],
+        "module": "ESNext",
+        "skipLibCheck": true,
+        "moduleResolution": "bundler",
+        "baseUrl": ".",
+        "paths": { "@/*": ["../../sd-phone/web/src/*"], "@device": ["./device.ts"] },
+        "allowImportingTsExtensions": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
+        "noEmit": true,
+        "jsx": "react-jsx",
+        "strict": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "noFallthroughCasesInSwitch": true
+    },
+    // sd-phone's source is checked here too — it is what this build ships, and it is the only
+    // place the tablet profile can go wrong. Its tests are not: they are sd-phone's to run, and
+    // typing them would drag vitest into a project that only builds.
+    "include": ["src", "device.ts", "../../sd-phone/web/src"],
+    "exclude": ["../../sd-phone/web/src/**/*.test.ts", "../../sd-phone/web/src/**/*.test.tsx"]
+}
