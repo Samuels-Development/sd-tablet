@@ -6,7 +6,6 @@
         "module": "ESNext",
         "skipLibCheck": true,
         "moduleResolution": "bundler",
-        "baseUrl": ".",
         "paths": { "@/*": ["../../sd-phone/web/src/*"], "@device": ["./device.ts"] },
         "allowImportingTsExtensions": true,
         "resolveJsonModule": true,
