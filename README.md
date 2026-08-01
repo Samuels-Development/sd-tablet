@@ -1,6 +1,6 @@
 <div align="center">
 
-# sd-tablet
+# sd-tablet (W.I.P)
 
 **An in-game tablet for FiveM, and a companion to [sd-phone](https://github.com/Samuels-Development/sd-phone).**
 Same apps, same accounts, same character, **the same data**. Every message, contact, mail thread, note, photo, installed app and setting is the phone's, because there is only one copy of it and both devices read it. Nothing syncs, because nothing has to.
