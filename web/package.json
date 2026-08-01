@@ -6,7 +6,7 @@
     "scripts": {
         "sync:sdk": "node -e \"const fs=require('node:fs');fs.mkdirSync('public',{recursive:true});fs.copyFileSync('../../sd-phone/web/public/components.js','public/components.js')\"",
         "dev": "npm run sync:sdk && vite",
-        "build": "npm run sync:sdk && tsc --noEmit && vite build",
+        "build": "npm run sync:sdk && tsc --noEmit && vite build && node scripts/check-tailwind-output.mjs",
         "preview": "vite preview"
     },
     "dependencies": {
