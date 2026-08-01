@@ -23,7 +23,11 @@ initTileCheck();
 document.addEventListener('mousedown', e => {
     if ((e.target as HTMLElement | null)?.closest?.('.select-text')) return;
     const sel = window.getSelection();
-    if (sel && !sel.isCollapsed) sel.removeAllRanges();
+    if (!sel || sel.isCollapsed) return;
+    const anchor = sel.anchorNode;
+    const host = anchor instanceof HTMLElement ? anchor : anchor?.parentElement;
+    if (host?.isContentEditable) return;
+    sel.removeAllRanges();
 });
 
 // Seeded only when absent, so clearing a key replays that flow on reload instead of having the
