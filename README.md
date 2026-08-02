@@ -170,7 +170,8 @@ keybind without carrying anything, or `Items = false` to drop item-based opening
 ```
 
 The export name is derived from the item name (`tablet_blue` → `useTablet_blue`), so a renamed item
-needs a matching `server.export`. Icons for each colour ship as `tablet_<colour>.png`.
+needs a matching `server.export`. The item icons ship in this repo's `images/` folder as
+`tablet_<colour>.png` - copy them into your inventory's image directory (`ox_inventory/web/images/`).
 
 **QBCore / QBox**, in `qb-core/shared/items.lua`:
 
