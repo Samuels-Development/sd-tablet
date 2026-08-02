@@ -222,6 +222,15 @@ local POSE_FLAGS <const> = 1 | 8 | 16 | 32
 ---@type integer|nil Handle of the attached tablet prop, nil while stowed.
 local prop = nil
 
+---@type string Colour the tablet is currently held in; always a key of TABLET_COLORS.
+local currentColor = cfg.DefaultColor or 'black'
+
+---@type table<string, true> Colours any configured item can open, used to whitelist every colour
+---that arrives from the server or off another player's statebag.
+local TABLET_COLORS = {}
+for _, entry in ipairs(cfg.Items or {}) do TABLET_COLORS[entry.color] = true end
+if not TABLET_COLORS[currentColor] then TABLET_COLORS[currentColor] = true end
+
 ---Whether sd-phone framed the current shot with the NATIVE cell-cam rather than with its own
 ---scripted camera. The two are nothing alike from this side: the native pins the ped at engine
 ---level, plays a pose of its own and spawns its own phone prop, while the scripted one only takes
@@ -253,9 +262,10 @@ end
 ---to this client: cross-player visibility spawns one of these per nearby holder, never a networked
 ---object, because a networked prop's ownership can migrate to a client whose sync then freezes it.
 ---@param ped integer ped to attach the prop to
+---@param color string colour to weld; must be a key of TABLET_COLORS
 ---@return integer|nil prop the welded prop entity, or nil if the model wouldn't stream
-local function createProp(ped)
-    local model = joaat(cfg.PropModel)
+local function createProp(ped, color)
+    local model = joaat(cfg.PropPrefix .. color)
     RequestModel(model)
     local started = GetGameTimer()
     while not HasModelLoaded(model) and GetGameTimer() - started < 1000 do Wait(0) end
@@ -277,11 +287,12 @@ local function removeProp()
     prop = nil
 end
 
----Broadcasts the hold state via the replicated `sdTablet` player statebag: true while holding,
----false otherwise. No-op when cross-player visibility is off.
+---Broadcasts the hold state via the replicated `sdTablet` player statebag: the held colour while
+---holding, false otherwise, so nearby clients weld a matching copy. No-op when cross-player
+---visibility is off.
 local function broadcastHoldState()
     if not cfg.PropVisibleToOthers then return end
-    LocalPlayer.state:set('sdTablet', shouldHold(), true)
+    LocalPlayer.state:set('sdTablet', shouldHold() and currentColor or false, true)
 end
 
 ---Plays the hold clip and welds the prop, on its own thread: the pose is cosmetic and must never
@@ -297,7 +308,7 @@ local function playPose()
         if not IsEntityPlayingAnim(ped, cfg.AnimDict, cfg.AnimName, 3) then
             TaskPlayAnim(ped, cfg.AnimDict, cfg.AnimName, 8.0, -8.0, -1, POSE_FLAGS, 0.0, false, false, false)
         end
-        if not (prop and DoesEntityExist(prop)) then prop = createProp(ped) end
+        if not (prop and DoesEntityExist(prop)) then prop = createProp(ped, currentColor) end
     end)
 end
 
@@ -713,11 +724,14 @@ end)
 local function ToggleTablet()
     if tabletState.open then CloseTablet() return end
 
-    local res = lib.callback.await('sd-tablet:server:resolveOpen', false)
+    -- The last-used colour rides along as a hint so the keybind keeps handing back the same
+    -- tablet; the server only honours it while that item is still owned.
+    local res = lib.callback.await('sd-tablet:server:resolveOpen', false, currentColor)
     if type(res) ~= 'table' or res.ok ~= true then
         notify((type(res) == 'table' and res.message) or 'You don\'t have a tablet.', 'error')
         return
     end
+    if res.color and TABLET_COLORS[res.color] then currentColor = res.color end
     OpenTablet()
 end
 
@@ -731,9 +745,12 @@ RegisterCommand('+sdtablet_look', enterLookMode, false)
 RegisterCommand('-sdtablet_look', exitLookMode, false)
 RegisterKeyMapping('+sdtablet_look', 'Tablet: Hold to look around', 'keyboard', cfg.LookKeybind)
 
----Opens the tablet after the tablet item is used. The server has already resolved ownership by
----definition - it is the item's own use callback that fired this.
-RegisterNetEvent('sd-tablet:client:openFromItem', function()
+---Opens the tablet after a tablet item is used, in that item's colour. The server has already
+---resolved ownership by definition - it is the item's own use callback that fired this. The colour
+---is whitelist-checked because it arrives over the network.
+---@param color string|nil colour of the item that was used
+RegisterNetEvent('sd-tablet:client:openFromItem', function(color)
+    if color and TABLET_COLORS[color] then currentColor = color end
     OpenTablet()
 end)
 
@@ -830,15 +847,15 @@ CreateThread(function()
     end
 end)
 
----@type table<integer, integer> Server id -> local tablet-prop copy welded onto that remote
----holder's ped.
+---@type table<integer, { obj: integer, color: string }> Server id -> local tablet-prop copy welded
+---onto that remote holder's ped, with the colour it was welded in.
 local remoteProps = {}
 
 ---Deletes a remote holder's welded prop copy, if any. Idempotent.
 ---@param source integer server id of the remote holder
 local function removeRemoteProp(source)
-    local obj = remoteProps[source]
-    if obj and DoesEntityExist(obj) then DeleteObject(obj) end
+    local entry = remoteProps[source]
+    if entry and DoesEntityExist(entry.obj) then DeleteObject(entry.obj) end
     remoteProps[source] = nil
 end
 
@@ -864,19 +881,23 @@ if cfg.PropVisibleToOthers then
             removeRemoteProp(source)
             return
         end
-        if remoteProps[source] and DoesEntityExist(remoteProps[source]) then return end
+        -- The bag carries the holder's colour, so an unknown one is dropped rather than welded.
+        if not TABLET_COLORS[value] then return end
+        local entry = remoteProps[source]
+        if entry and entry.color == value and DoesEntityExist(entry.obj) then return end
         removeRemoteProp(source)
-        remoteProps[source] = createProp(ped)
+        local obj = createProp(ped, value)
+        if obj then remoteProps[source] = { obj = obj, color = value } end
     end)
 
     -- 1s sweep: removes copies whose owner left scope or whose prop no longer exists.
     CreateThread(function()
         while true do
             Wait(1000)
-            for source, obj in pairs(remoteProps) do
+            for source, entry in pairs(remoteProps) do
                 local plyr = GetPlayerFromServerId(source)
                 local ped = plyr ~= -1 and GetPlayerPed(plyr) or 0
-                if ped == 0 or not DoesEntityExist(ped) or not DoesEntityExist(obj) then
+                if ped == 0 or not DoesEntityExist(ped) or not DoesEntityExist(entry.obj) then
                     removeRemoteProp(source)
                 end
             end

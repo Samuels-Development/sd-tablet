@@ -109,9 +109,13 @@ Drop `sd-tablet` **next to `sd-phone`** in your resources folder, then start it 
 ```cfg
 ensure ox_lib
 ensure oxmysql
+ensure sd-tablet-props
 ensure sd-phone
 ensure sd-tablet
 ```
+
+`sd-tablet-props` streams the coloured `sd_tablet_<colour>` hand props. It is optional - without it
+the tablet still works, players just hold nothing visible.
 
 > [!NOTE]
 > "Next to sd-phone" is not cosmetic. The UI build resolves sd-phone's source through a relative
@@ -142,35 +146,38 @@ warning at boot if it is missing, so a source checkout never opens to a silent b
 
 `web/build` is **not** committed. Rebuild it before every deploy.
 
-### 3. Add the tablet item
+### 3. Add the tablet items
 
-The item name is `Item` in `configs/tablet.lua` (default `tablet`). Set `RequireItem = false` there
-if you would rather everyone had the keybind without carrying anything, or `Item = false` to drop
-item-based opening entirely.
+The items are `Items` in `configs/tablet.lua`, one entry per colour (`tablet`, `tablet_black`,
+`tablet_blue`, `tablet_green`, `tablet_orange`, `tablet_pink`, `tablet_purple`, `tablet_red`,
+`tablet_yellow`). Using one opens the tablet holding the matching `sd_tablet_<colour>` prop, exactly
+as the phone items pick their frame colour; the keybind reopens with the colour you last used, as
+long as you still carry it. Set `RequireItem = false` there if you would rather everyone had the
+keybind without carrying anything, or `Items = false` to drop item-based opening entirely.
 
-**ox_inventory**, in `ox_inventory/data/items.lua`:
+**ox_inventory**, in `ox_inventory/data/items.lua` — one block per colour:
 
 ```lua
-['tablet'] = {
-    label       = 'Tablet',
+['tablet_blue'] = {
+    label       = 'Blue Tablet',
     weight      = 700,
     stack       = false,
     close       = true,
     description = 'A tablet. Everything your phone does, except calls.',
-    client      = { image = 'tablet.png' },
-    server      = { export = 'sd-tablet.useTablet' },
+    client      = { image = 'tablet_blue.png' },
+    server      = { export = 'sd-tablet.useTablet_blue' },
 },
 ```
 
-The export name is derived from the item name (`tablet` → `useTablet`), so a renamed item needs a
-matching `server.export`.
+The export name is derived from the item name (`tablet_blue` → `useTablet_blue`), so a renamed item
+needs a matching `server.export`. Icons for each colour ship as `tablet_<colour>.png`.
 
 **QBCore / QBox**, in `qb-core/shared/items.lua`:
 
 ```lua
-['tablet'] = {
-    name = 'tablet', label = 'Tablet', weight = 700, type = 'item',
-    image = 'tablet.png', unique = true, useable = true, shouldClose = true,
+['tablet_blue'] = {
+    name = 'tablet_blue', label = 'Blue Tablet', weight = 700, type = 'item',
+    image = 'tablet_blue.png', unique = true, useable = true, shouldClose = true,
     description = 'A tablet. Everything your phone does, except calls.'
 },
 ```
@@ -179,7 +186,7 @@ matching `server.export`.
 
 ```sql
 INSERT INTO `items` (`name`, `label`, `weight`, `rare`, `can_remove`)
-VALUES ('tablet', 'Tablet', 1, 0, 1);
+VALUES ('tablet_blue', 'Blue Tablet', 1, 0, 1);
 ```
 
 Also supported with no extra configuration: tgiann, jaksam, qs / qs-pro, origen, codem,

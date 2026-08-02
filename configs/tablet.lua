@@ -8,13 +8,30 @@
 -- resource's config files at load time makes the tablet fail to boot whenever sd-phone's file
 -- layout moves, and a wrongly formatted phone number is a much cheaper failure than that.
 return {
-    -- Inventory item that opens the tablet when used. Unlike the phone there are no colour
-    -- variants: a tablet is a tablet. Set to false to disable item-based opening entirely.
-    Item = 'tablet',
+    -- Inventory items that open the tablet, one per colour. Using an item opens the tablet with
+    -- that colour's prop in hand (PropPrefix .. colour); the keybind reopens with the last colour
+    -- you used, falling back to whichever listed item you actually carry. Set to false to disable
+    -- item-based opening entirely. `tablet` is the pre-colour item, kept so tablets already in
+    -- players' inventories keep working.
+    Items = {
+        { item = 'tablet',        color = 'black'  },
+        { item = 'tablet_black',  color = 'black'  },
+        { item = 'tablet_blue',   color = 'blue'   },
+        { item = 'tablet_green',  color = 'green'  },
+        { item = 'tablet_orange', color = 'orange' },
+        { item = 'tablet_pink',   color = 'pink'   },
+        { item = 'tablet_purple', color = 'purple' },
+        { item = 'tablet_red',    color = 'red'    },
+        { item = 'tablet_yellow', color = 'yellow' },
+    },
 
-    -- Require the player to actually carry `Item` before the keybind opens anything. The check is
-    -- server-side (server/main.lua), so turning this off is the only way to open without one.
-    -- Ignored when Item is false, which leaves the keybind open to everybody.
+    -- Colour the tablet opens with before any item has been used this session (the keybind
+    -- fallback). Must be one of the colours listed in Items.
+    DefaultColor = 'black',
+
+    -- Require the player to actually carry one of `Items` before the keybind opens anything. The
+    -- check is server-side (server/main.lua), so turning this off is the only way to open without
+    -- one. Ignored when Items is false, which leaves the keybind open to everybody.
     RequireItem = true,
 
     -- Default keybind to open / close the tablet. Players can rebind it via FiveM's keybinding
@@ -61,16 +78,31 @@ return {
     StartLocked = true,
 
     -- Third-person "holding a tablet" pose + prop. Looping upper-body clip, so the player can
-    -- still walk. Unlike the phone there is one model, not one per frame colour.
+    -- still walk. The prop model is PropPrefix .. <colour> (e.g. sd_tablet_red), so the tablet in
+    -- hand matches the item you opened. These models are streamed by the sd-tablet-props resource
+    -- - ensure it's started, or no prop will attach (the tablet itself still works).
     HoldAnimation = true,
     AnimDict      = 'amb@code_human_in_bus_passenger_idles@female@tablet@base',
     AnimName      = 'base',
-    PropModel     = 'prop_cs_tablet',
-    PropBone      = 60309,   -- SKEL_L_Hand: the tablet clip holds the device in the LEFT hand
+    PropPrefix    = 'sd_tablet_',
+    PropBone      = 60309,   -- SKEL_L_Hand: this clip holds the device in the LEFT hand
 
-    -- Fine-tune where the prop sits in the hand. prop_cs_tablet is authored so a zero
-    -- offset/rotation weld to SKEL_L_Hand lands in the reading grip for the clip above; nudge
-    -- these only if you swap in a model whose origin is off the grip point.
+    -- Other clips worth swapping in. Each needs its bone AND the transform below changed with it,
+    -- because they do not all hold the device in the same hand or at the same wrist angle:
+    --
+    --   ps-mdt's clip, right hand, matching how ps-mdt itself welds a tablet:
+    --     AnimDict = 'amb@code_human_in_bus_passenger_idles@female@tablet@idle_a'
+    --     AnimName = 'idle_a'      PropBone = 28422
+    --     PropOffset = vec3(-0.012, 0.001, 0.037)     PropRot = vec3(0.0, -90.0, 0.0)
+    --
+    --   Tourist map, both hands, completely still - no reaching in to swipe:
+    --     AnimDict = 'amb@world_human_tourist_map@male@base'
+    --     AnimName = 'base'        PropBone = 28422
+
+    -- Zero, because the sd_tablet_<colour> models are built to the same convention as the vanilla
+    -- prop_cs_tablet: centre origin, X across the screen, Y through it, Z up it. They weld where
+    -- the vanilla tablet welds, so a clip authored around that needs no transform at all. A clip
+    -- that turns the wrist differently still does - see the swaps above.
     PropOffset = vec3(0.0, 0.0, 0.0),
     PropRot    = vec3(0.0, 0.0, 0.0),
 

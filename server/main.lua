@@ -223,53 +223,94 @@ end)
 -- Ownership
 -- ---------------------------------------------------------------------------
 
----Whether a player may open a tablet right now.
+---The colour of a tablet item this player actually carries, preferring the one they last opened
+---with so the keybind keeps handing back the same device.
 ---@param source number player server id
----@return boolean ok, string|nil message reason to show when refused
-local function mayOpen(source)
+---@param preferred string|nil last-used colour hint from the client
+---@return string|nil color colour to open with, nil when no tablet item is owned
+local function resolveOwnedColor(source, preferred)
+    local items = cfg.Items or {}
+    if preferred then
+        for _, entry in ipairs(items) do
+            if entry.color == preferred and countItem(source, entry.item) > 0 then
+                return entry.color
+            end
+        end
+    end
+    for _, entry in ipairs(items) do
+        if countItem(source, entry.item) > 0 then return entry.color end
+    end
+    return nil
+end
+
+---Whether a player may open a tablet right now, and in which colour.
+---@param source number player server id
+---@param preferred string|nil last-used colour hint from the client
+---@return boolean ok
+---@return string|nil message reason to show when refused
+---@return string|nil color colour to open with
+local function mayOpen(source, preferred)
     if simModeActive() then
         return false, 'This server uses SIM cards - a tablet has no SIM. Use your phone.'
     end
-    if not cfg.Item or cfg.RequireItem == false then return true end
-    if countItem(source, cfg.Item) > 0 then return true end
+    if not cfg.Items or cfg.RequireItem == false then
+        return true, nil, resolveOwnedColor(source, preferred) or cfg.DefaultColor
+    end
+    local color = resolveOwnedColor(source, preferred)
+    if color then return true, nil, color end
     return false, 'You don\'t have a tablet.'
 end
 
----Keybind open request: may this player open a tablet? The client asks before every open, so the
----item check is authoritative in the only place it can be - a client-side check is a suggestion.
-lib.callback.register('sd-tablet:server:resolveOpen', function(source)
-    local ok, message = mayOpen(source)
-    return { ok = ok, message = message }
+---Keybind open request: may this player open a tablet, and in which colour? The client asks before
+---every open, so the item check is authoritative in the only place it can be - a client-side check
+---is a suggestion.
+lib.callback.register('sd-tablet:server:resolveOpen', function(source, preferred)
+    local ok, message, color = mayOpen(source, preferred)
+    return { ok = ok, message = message, color = color }
 end)
 
--- Boot: registers the usable tablet item once. Deferred a tick like sd-phone's, so the inventory
+-- Boot: registers every usable tablet item once. Deferred a tick like sd-phone's, so the inventory
 -- resource's own exports exist by the time we hand it a callback.
 CreateThread(function()
     Wait(50)
-    if not cfg.Item then return end
-    registerUsable(cfg.Item, function(source)
-        -- No ownership check here: using the item IS the proof. The SIM refusal still applies,
-        -- and is answered with a toast rather than silence so the player knows why nothing opened.
-        if simModeActive() then
-            TriggerClientEvent('ox_lib:notify', source, {
-                title       = 'Tablet',
-                description = 'This server uses SIM cards - a tablet has no SIM. Use your phone.',
-                type        = 'error',
-            })
-            return
-        end
-        TriggerClientEvent('sd-tablet:client:openFromItem', source)
-    end)
+    if not cfg.Items then return end
+    for _, entry in ipairs(cfg.Items) do
+        registerUsable(entry.item, function(source)
+            -- No ownership check here: using the item IS the proof. The SIM refusal still applies,
+            -- and is answered with a toast rather than silence so the player knows why nothing
+            -- opened.
+            if simModeActive() then
+                TriggerClientEvent('ox_lib:notify', source, {
+                    title       = 'Tablet',
+                    description = 'This server uses SIM cards - a tablet has no SIM. Use your phone.',
+                    type        = 'error',
+                })
+                return
+            end
+            TriggerClientEvent('sd-tablet:client:openFromItem', source, entry.color)
+        end)
+    end
 end)
 
----Public export: does this player own a tablet - exports['sd-tablet']:hasTablet(source).
+---Public export: does this player own a tablet - exports['sd-tablet']:hasTablet(source). Stays
+---boolean rather than returning the colour, because callers already treat it as a yes/no.
 ---@param source number player server id
 ---@return boolean
 exports('hasTablet', function(source)
     if type(source) ~= 'number' then return false end
     if not GetPlayerName(source) then return false end
-    if not cfg.Item then return false end
-    return countItem(source, cfg.Item) > 0
+    if not cfg.Items then return false end
+    return resolveOwnedColor(source, nil) ~= nil
+end)
+
+---Public export: which colour tablet does this player carry - exports['sd-tablet']:tabletColor(source).
+---@param source number player server id
+---@return string|nil color owned colour, nil when no tablet item is owned
+exports('tabletColor', function(source)
+    if type(source) ~= 'number' then return nil end
+    if not GetPlayerName(source) then return nil end
+    if not cfg.Items then return nil end
+    return resolveOwnedColor(source, nil)
 end)
 
 if not framework then
