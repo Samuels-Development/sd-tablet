@@ -7,6 +7,7 @@
         "sync:sdk": "node -e \"require('fs').copyFileSync('../../sd-phone/web/public/components.js','public/components.js')\"",
         "dev": "npm run sync:sdk && vite",
         "build": "npm run sync:sdk && tsc --noEmit && vite build",
+        "build:demo": "npm run sync:sdk && tsc --noEmit && vite build --mode demo",
         "preview": "vite preview"
     },
     "dependencies": {
@@ -15,14 +16,14 @@
         "class-variance-authority": "0.7.1",
         "clsx": "2.1.1",
         "html2canvas": "1.4.1",
-        "lucide-react": "0.577.0",
-        "react": "18.3.1",
-        "react-dom": "18.3.1",
+        "lucide-react": "1.26.0",
+        "react": "19.2.8",
+        "react-dom": "19.2.8",
         "zustand": "5.0.14"
     },
     "devDependencies": {
-        "@types/react": "18.3.31",
-        "@types/react-dom": "18.3.7",
+        "@types/react": "19.2.17",
+        "@types/react-dom": "19.2.3",
         "@vitejs/plugin-react": "6.0.4",
         "autoprefixer": "10.5.4",
         "postcss": "8.5.22",
