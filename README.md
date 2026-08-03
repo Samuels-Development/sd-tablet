@@ -21,7 +21,8 @@ If sd-tablet is useful to you, please ⭐ the repo. Issues and pull requests are
 </div>
 
 ## Preview
- <img width="1500" height="1500" alt="v10_flower_screen" src="https://github.com/user-attachments/assets/9dabc95f-805b-4f10-af6f-a53a8250f7a8" />
+<img width="1500" height="1500" alt="image" src="https://github.com/user-attachments/assets/80b1f007-08fb-4b44-8cc8-1be80e279d27" />
+
 <img width="1500" height="1500" alt="v10_pinwheel" src="https://github.com/user-attachments/assets/18c7d631-62c7-4a31-b5aa-15d4a054bf5a" />
 
 
