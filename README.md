@@ -52,7 +52,7 @@ the other.
 | **Shared with the phone** | Messages, contacts, mail, notes, photos, app accounts and logins, wallet, settings, passcode and Face Unlock, installed apps, notifications, badges |
 | **The tablet's own** | Home screen arrangement, and the device itself: item, keybind, hold pose and prop |
 | **Not available** | Voice calls, the payphone UI, the admin panel, the first-run setup wizard, the flashlight |
-| **Tablet-only** | The **MDT**, a police terminal laid out for this screen. sd-phone ships it hidden and its backend switched off, so it costs a phone-only server nothing; see step 5 below. |
+| **Tablet-only** | The **MDT terminals** for police, EMS and DOJ, laid out for this screen. sd-phone ships them hidden and their backend switched off, so they cost a phone-only server nothing; see step 5 below. |
 
 ## Why no calls
 
@@ -204,11 +204,15 @@ qb-inventory, ps-inventory, lj-inventory. The same backend list sd-phone support
 
 Press <kbd>F2</kbd>, or use the `tablet` item.
 
-### 5. Turn on the MDT (optional)
+### 5. Turn on the MDT terminals (optional)
 
-The tablet ships with the **MDT**, sd-phone's police terminal. Its icon is on the home screen from
-the start, but its backend lives in sd-phone and is **off by default**, so out of the box the app
-opens to a locked screen and the server console says so once.
+The tablet ships with three terminals from sd-phone: **MDT** for police, **EMS** for medics and
+**DOJ** for the courts. Their backend lives in sd-phone and is **off by default**, so out of the
+box no icon appears and the server console says so once.
+
+Which one a player sees is decided per open by their active framework job, from the departments in
+sd-phone's `configs/mdt.lua`. A `leo` department gets the MDT, `ems` gets the EMS terminal, `doj`
+gets the DOJ one, and anyone else gets no icon at all rather than one that refuses them.
 
 In **sd-phone**, `configs/mdt.lua`:
 

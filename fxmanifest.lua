@@ -4,7 +4,7 @@ lua54 'yes'
 
 name 'sd-tablet'
 author 'Samuel#0008'
-version '0.1.0'
+version '0.9.5'
 description 'In-game tablet: a second device running the sd-phone React bundle over sd-phone\'s own client and server layer. Shares every byte of player data with the phone - messages, mail, contacts, installed apps, settings - and can do everything the phone can except make or receive voice calls'
 
 shared_scripts {

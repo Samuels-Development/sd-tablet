@@ -10,7 +10,9 @@ export const device: DeviceProfile = {
     calls:        false,
     payphone:     false,
     admin:        false,
-    setup:        false,
+    // Its own device, so its own first-run wizard: settings are stored per device, and this is
+    // where the tablet's language, passcode, theme and wallpaper get chosen rather than inherited.
+    setup:        true,
     // No cellular radio, so no dialler.
     excludedApps: ['phone'],
     // A landscape slab is too wide to sit in a corner without crowding the edge of the screen.

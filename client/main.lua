@@ -496,7 +496,9 @@ local function openPayload()
             lock = config.Apps.Wallpaper,
             home = config.Apps.Wallpaper,
         },
-        sim = { enabled = false },
+        -- The honest answer, not a flat false: the shared UI needs it to know whether "no SIM"
+        -- means No Service or simply that this server does not use SIMs at all.
+        sim = { enabled = simModeActive() },
     }
 end
 
@@ -559,10 +561,11 @@ local function OpenTablet()
         return false
     end
 
-    if simModeActive() then
-        notify('This server uses SIM cards - a tablet has no SIM. Use your phone.', 'error')
-        return false
-    end
+    -- SIM servers used to refuse outright, which left the tablet unusable on every one of them.
+    -- It has no SIM of its own and never will: it borrows the identity of the SIM in the phone
+    -- you are carrying, exactly as it borrows everything else. sd-phone resolves that per PLAYER,
+    -- so a tablet request already answers as the right number. With no SIM the shared UI shows
+    -- its own No Service screen, the same as the phone does.
 
     local ped = PlayerPedId()
     if cfg.BlockWhileDead and IsEntityDead(ped) then

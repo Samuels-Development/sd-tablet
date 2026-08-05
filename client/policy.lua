@@ -96,8 +96,6 @@ policy.LOCAL = {
 --   sd-phone:battery    a different device with a different charge. The tablet drains its own.
 --   sd-phone:launchApp  exports['sd-phone']:openApp targets the PHONE - and opens it, which
 --                       closes us first anyway. exports['sd-tablet']:openApp is the tablet's.
---   sd-phone:simState   a SIM lives in a phone. The tablet has no SIM tray and always reports
---                       sim.enabled = false (and refuses to open at all in SIM mode).
 --   sd-phone:frameColor which coloured phone shell the player is holding. A tablet has no
 --                       variants; this would recolour a rail that isn't there.
 --   sd-phone:admin:open the admin overlay, matching the DENY prefix above. It arrives with a
@@ -113,13 +111,16 @@ policy.LOCAL = {
 --
 --   sd-phone:profileReset a cloud-backup restore replaced the profile's data in place.
 --   sd-phone:wipe         an admin wipe; the React app clears local storage and reloads.
+--
+-- sd-phone:simState is deliberately NOT dropped. The tablet has no SIM tray of its own, but it
+-- borrows the identity of the SIM in the phone you are carrying, so it has to hear when that
+-- changes: without it the shared UI sits on No Service forever on a SIM server.
 ---@type table<string, boolean>
 local DROP = {
     ['sd-phone:open']         = true,
     ['sd-phone:close']        = true,
     ['sd-phone:battery']      = true,
     ['sd-phone:launchApp']    = true,
-    ['sd-phone:simState']     = true,
     ['sd-phone:frameColor']   = true,
     ['sd-phone:admin:open']   = true,
     ['sd-phone:profileReset'] = true,
