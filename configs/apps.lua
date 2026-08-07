@@ -31,8 +31,10 @@ return {
     -- device's grid, in the order defined below. `route` is the SPA path the React app navigates
     -- to when the icon is tapped.
     Apps = {
-        -- The three terminals, tablet-only: sd-phone's catalog carries all three ids with
-        -- `enabled = false` so no phone ever shows them.
+        -- The three terminals, on both devices: sd-phone's catalog carries all three ids with
+        -- `enabled = true` as well, and the shared bundle lays the same sections out per screen -
+        -- one pushed section at a time on a phone, the multi-tab browser on this one. A player
+        -- with a terminal job gets it on whichever device is in their hands.
         --
         -- Listing them here only says the tablet HAS them. Which one a player sees is decided
         -- per open by their framework job, from the departments in sd-phone's configs/mdt.lua:
@@ -46,9 +48,10 @@ return {
         { id = 'emsmdt', label = 'EMS', icon = 'emsmdt', route = '/emsmdt', accent = '#E11D48', base = true, enabled = true },
         { id = 'dojmdt', label = 'DOJ', icon = 'dojmdt', route = '/dojmdt', accent = '#6D28D9', base = true, enabled = true },
 
-        -- Racing is tablet-only on the same terms: sd-phone's catalog carries
-        -- `racing` with `enabled = false`, so no phone shows it. The app itself is sd-phone's,
-        -- gated by `Enabled` in its configs/racing.lua; with that off this icon stays hidden.
+        -- Racing is on both devices as well: sd-phone's catalog carries `racing` with
+        -- `enabled = true`, and the same panes reflow to a phone. No job gate stands in front of
+        -- it, so every player sees it. The app itself is sd-phone's, gated by `Enabled` in its
+        -- configs/racing.lua; with that off this icon stays hidden.
         { id = 'racing', label = 'Racing', icon = 'racing', route = '/racing', accent = '#0BF2B4', base = true, enabled = true },
 
         { id = 'messages', label = 'Messages', icon = 'messages', route = '/messages', accent = '#34c759', base = true, enabled = true },
