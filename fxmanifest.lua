@@ -26,6 +26,10 @@ ui_page 'web/build/index.html'
 files {
     'configs/*.lua',
     'client/**.lua',
+    -- ox_lib's locale module reads these with LoadResourceFile, so they ship as files. Both
+    -- realms call lib.locale(): the client resolves the player's ox_lib language setting, the
+    -- server the `ox:locale` convar.
+    'locales/*.json',
     'web/build/index.html',
     'web/build/components.js',
     'web/build/assets/*.js',

@@ -96,7 +96,7 @@ RegisterNUICallback('rpc', function(data, cb)
         end
         local ok, err = pcall(handlers[action], data.payload, answer)
         if not ok then
-            print(('^1[sd-tablet:rpc]^0 %s failed: %s'):format(action, err))
+            lib.print.error(('rpc %s failed: %s'):format(action, err))
             answer({ success = false, message = 'Handler error' })
         end
         return

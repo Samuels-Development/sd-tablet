@@ -17,6 +17,11 @@ local cfg <const> = config.Tablet
 ---@type string The resource we borrow everything from.
 local PHONE <const> = 'sd-phone'
 
+-- Every string this resource puts in front of a player comes from locales/<lang>.json. The React
+-- app has its own catalog keyed off config.Locale; this is only the Lua half - refusals, the
+-- notify title, and the two keybind labels FiveM shows in its binding menu.
+lib.locale()
+
 -- Apps disabled in configs/apps.lua never reach the NUI; built once, the catalog is static per boot.
 ---@type table[] Enabled app entries, config order preserved.
 local ENABLED_APPS = {}
@@ -100,10 +105,13 @@ local cameraCursorFree = false
 ---@type fun() Tablet close; assigned further down, referenced by threads defined before it.
 local CloseTablet
 
----Prints debug output when config.Debug is enabled.
+---Debug breadcrumb. Two ways to turn it on, because they answer different questions:
+---config.Debug is the resource's own switch and prints at info so it shows with no setup, while
+---`setr ox:printlevel:sd-tablet debug` turns the same output on live, without editing a config.
 ---@param ... any values to print
 local function debugPrint(...)
-    if config.Debug then print('[sd-tablet:client]', ...) end
+    if config.Debug then return lib.print.info(...) end
+    lib.print.debug(...)
 end
 
 ---Shows an on-screen toast; ox_lib is a hard dependency, so it is always the backend here.
@@ -111,8 +119,10 @@ end
 ---@param kind string|nil 'error' | 'inform' | 'success'
 local function notify(description, kind)
     lib.notify({
-        id          = math.random(1, 999999),
-        title       = 'Tablet',
+        -- UUIDv7, not a random int: ox_lib treats the id as a dedupe key, so a collision replaces
+        -- a toast the player is still reading.
+        id          = lib.uuid.generate(),
+        title       = locale('tablet'),
         description = description,
         type        = kind or 'inform',
         position    = 'top-right',
@@ -327,6 +337,15 @@ local function updatePose()
     broadcastHoldState()
 end
 
+-- A respawn or a ped-model change hands the player a NEW ped, and our prop is still welded to the
+-- old one - which the game does not necessarily delete, so it can be left hanging in the world.
+-- The clip re-applies itself on the tick below, but the orphaned prop never would. ox_lib already
+-- tracks the ped for `cache.ped`, so this subscribes to that change rather than adding a poll.
+lib.onCache('ped', function()
+    removeProp()
+    if tabletState.open then updatePose() end
+end)
+
 -- Re-applies the held clip if the game clears it: an upper-body secondary task loses to sprints,
 -- jumps and vehicle transitions, and this device is explicitly usable while walking. Backs off to
 -- a 1s tick while stowed, since the thread lives for the whole session either way.
@@ -371,6 +390,44 @@ end
 ---@type boolean True while the per-frame input thread is running.
 local inputThreadRunning = false
 
+-- The four control sets this device suppresses, as data. They are handed to ox_lib's
+-- lib.disableControls, which keeps ONE refcounted set and re-asserts all of it in a single call
+-- per frame - so the thread below toggles a group when the state changes rather than issuing the
+-- same two dozen DisableControlAction calls every frame regardless.
+
+---@type integer[] INPUT_FRONTEND_PAUSE and its alternate; held whenever the tablet is on screen.
+local CONTROLS_PAUSE <const> = { 199, 200 }
+
+---@type integer[] Combat, melee, weapon-wheel, cover, chat - and the scroll-wheel fall-throughs
+---under keep-input, because the UI owns the wheel.
+local CONTROLS_MOVEMENT <const> = {
+    24, 25, 37, 106, 245, 246, 257, 263, 264, 140, 141, 142, 143,
+    14, 15, 16, 17, 81, 82, 83, 84, 85, 99, 100,
+}
+
+---@type integer[] Mouse-look. Dropped while the Camera app aims the lens, or it would be immovable.
+local CONTROLS_LOOK <const> = { 1, 2 }
+
+---@type integer[] The number row, which GTA binds to weapon slots while a digit field is focused.
+local CONTROLS_DIGITS <const> = { 157, 158, 159, 160, 161, 162, 163, 164, 165, 166 }
+
+---@type table<table, true> Groups currently added to lib.disableControls.
+local appliedControls = {}
+
+---Adds or removes a group exactly once per state change; Add/Remove are refcounted, so an
+---unbalanced pair would leave a control disabled for the rest of the session.
+---@param group integer[]
+---@param wanted boolean
+local function setControlGroup(group, wanted)
+    if wanted == (appliedControls[group] or false) then return end
+    appliedControls[group] = wanted or nil
+    if wanted then
+        lib.disableControls:Add(group)
+    else
+        lib.disableControls:Remove(group)
+    end
+end
+
 ---Runs ONE per-frame thread per open: holds the pause control down unconditionally, and with
 ---AllowMovement on also suppresses combat, mouse-look, weapon-wheel and chat as sd-phone does.
 local function startInputThread()
@@ -381,66 +438,48 @@ local function startInputThread()
         -- flag about to clear, which would leave an open tablet suppressing nothing.
         while true do
             while tabletState.open do
-                DisableControlAction(0, 199, true) -- INPUT_FRONTEND_PAUSE
-                DisableControlAction(0, 200, true) -- INPUT_FRONTEND_PAUSE_ALTERNATE
+                setControlGroup(CONTROLS_PAUSE, true)
 
+                ---@type boolean Whether the movement suppression applies this frame.
+                local suppress = false
                 if cfg.AllowMovement then
                     if IsPauseMenuActive() then
                         CloseTablet()
-                    elseif (not typingInTablet or typingNumeric) and not nativeCellCam() then
-                        DisablePlayerFiring(cache.playerId, true)
-                        -- The Camera app's Alt toggle aims the lens with the mouse; suppressing
-                        -- mouse-look while it has would make the lens immovable.
-                        if not lookMode and not cameraCursorFree then
-                            DisableControlAction(0, 1, true)
-                            DisableControlAction(0, 2, true)
-                        end
-                        DisableControlAction(0, 24, true)
-                        DisableControlAction(0, 25, true)
-                        DisableControlAction(0, 257, true)
-                        DisableControlAction(0, 263, true)
-                        DisableControlAction(0, 264, true)
-                        DisableControlAction(0, 140, true)
-                        DisableControlAction(0, 141, true)
-                        DisableControlAction(0, 142, true)
-                        DisableControlAction(0, 143, true)
-                        DisableControlAction(0, 37, true)
-                        DisableControlAction(0, 106, true)
-                        DisableControlAction(0, 245, true)
-                        DisableControlAction(0, 246, true)
-                        -- Scroll-wheel fall-throughs under keep-input: the UI owns the wheel.
-                        DisableControlAction(0, 14, true)
-                        DisableControlAction(0, 15, true)
-                        DisableControlAction(0, 16, true)
-                        DisableControlAction(0, 17, true)
-                        DisableControlAction(0, 81, true)
-                        DisableControlAction(0, 82, true)
-                        DisableControlAction(0, 83, true)
-                        DisableControlAction(0, 84, true)
-                        DisableControlAction(0, 85, true)
-                        DisableControlAction(0, 99, true)
-                        DisableControlAction(0, 100, true)
-                        if typingNumeric then
-                            -- Digit pad up: the number row must not fire GTA weapon-slot binds.
-                            for control = 157, 166 do
-                                DisableControlAction(0, control, true)
-                            end
-                        end
+                    else
+                        suppress = (not typingInTablet or typingNumeric) and not nativeCellCam()
                     end
                 end
+
+                setControlGroup(CONTROLS_MOVEMENT, suppress)
+                -- The Camera app's Alt toggle aims the lens with the mouse; suppressing mouse-look
+                -- while it has would make the lens immovable.
+                setControlGroup(CONTROLS_LOOK, suppress and not lookMode and not cameraCursorFree)
+                setControlGroup(CONTROLS_DIGITS, suppress and typingNumeric)
+
+                -- Not a control, so it stays a native and stays inside the frame loop.
+                if suppress then DisablePlayerFiring(cache.playerId, true) end
+
+                lib.disableControls()
                 Wait(0)
             end
 
             -- Held a few frames past the close, or the closing keypress opens the escape menu.
+            -- Pause is re-asserted rather than assumed: the loop above always adds it in practice,
+            -- but the hold is the one suppression that must not depend on how we got here.
+            setControlGroup(CONTROLS_PAUSE, true)
+            setControlGroup(CONTROLS_MOVEMENT, false)
+            setControlGroup(CONTROLS_LOOK, false)
+            setControlGroup(CONTROLS_DIGITS, false)
+
             local held = 0
             while held < 15 and not tabletState.open do
-                DisableControlAction(0, 199, true)
-                DisableControlAction(0, 200, true)
+                lib.disableControls()
                 held = held + 1
                 Wait(0)
             end
             if not tabletState.open then break end
         end
+        setControlGroup(CONTROLS_PAUSE, false)
         -- No yield since the break, so an open cannot be refused by a flag about to clear.
         inputThreadRunning = false
     end)
@@ -554,27 +593,27 @@ local function canOpen()
     if tabletState.open then return false end
 
     if GetResourceState(PHONE) ~= 'started' then
-        return false, 'The tablet can\'t connect right now.'
+        return false, locale('cannot_connect')
     end
 
     -- One switch disables both devices: a script taking the phone away means no screen, not a spare.
     local gotDisabled, disabled = phoneExport('isDisabled')
     if gotDisabled and disabled == true then
-        return false, 'You can\'t use your tablet right now.'
+        return false, locale('cannot_use')
     end
 
     -- No SIM check: the tablet borrows the identity of the SIM in the phone you carry, exactly as
     -- it borrows everything else, so a request already answers as the right number. With no SIM
     -- the shared UI shows its own No Service screen, the same as the phone does.
     if cfg.BlockWhileDead and IsEntityDead(cache.ped) then
-        return false, 'You can\'t use your tablet right now.'
+        return false, locale('cannot_use')
     end
     if cfg.BlockWhileSwimming and IsPedSwimming(cache.ped) then
-        return false, 'You can\'t use your tablet while swimming.'
+        return false, locale('cannot_use_swimming')
     end
     -- cache.vehicle is false on foot; seat -1 is the driver's.
     if cfg.BlockWhileDriving and cache.vehicle and cache.seat == -1 then
-        return false, 'Not while you\'re driving.'
+        return false, locale('cannot_use_driving')
     end
 
     return true
@@ -711,7 +750,7 @@ local function ToggleTablet()
     -- timeout resolves to nil - which the type check below already reports as a refusal.
     local res = lib.callback.await('sd-tablet:server:resolveOpen', 10000, currentColor)
     if type(res) ~= 'table' or res.ok ~= true then
-        notify((type(res) == 'table' and res.message) or 'You don\'t have a tablet.', 'error')
+        notify((type(res) == 'table' and res.message) or locale('no_tablet'), 'error')
         return
     end
     if res.color and TABLET_COLORS[res.color] then currentColor = res.color end
@@ -720,7 +759,7 @@ end
 
 lib.addKeybind({
     name        = 'sdtablet_toggle',
-    description = 'Toggle Tablet',
+    description = locale('keybind_toggle'),
     defaultKey  = cfg.Keybind,
     onPressed   = ToggleTablet,
 })
@@ -728,7 +767,7 @@ lib.addKeybind({
 -- Hold-to-look: press frees the mouse for camera rotation, release restores the cursor.
 lib.addKeybind({
     name        = 'sdtablet_look',
-    description = 'Tablet: Hold to look around',
+    description = locale('keybind_look'),
     defaultKey  = cfg.LookKeybind,
     onPressed   = enterLookMode,
     onReleased  = exitLookMode,
@@ -797,9 +836,10 @@ local LOCAL_HANDLERS = {
 }
 
 rpc.bind(LOCAL_HANDLERS)
-if config.Debug then
-    rpc.setTrace(function(kind, action) debugPrint(kind, action) end)
-end
+-- Installed unconditionally now that debugPrint is level-filtered: with config.Debug off the
+-- trace costs one filtered call per action and `setr ox:printlevel:sd-tablet debug` turns it on
+-- live, which is the whole point of not having to restart to see a forward.
+rpc.setTrace(function(kind, action) debugPrint(kind, action) end)
 
 -- The FLIP only ever travels page -> Lua as this callback, so watching it through is the one place
 -- this side can learn the lens. The app always enters on the rear one, and both ways to flip end here.

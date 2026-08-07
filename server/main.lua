@@ -1,7 +1,9 @@
+lib.locale()
+
 -- Build-presence guard: a source checkout without a compiled NUI would open to a blank tablet.
 if not LoadResourceFile(GetCurrentResourceName(), 'web/build/index.html') then
-    print('^1[sd-tablet] NUI build not found at web/build/index.html.^0')
-    print('^3[sd-tablet] Build it: cd web && bun install && bun run build^0')
+    lib.print.error('NUI build not found at web/build/index.html.')
+    lib.print.warn('Build it: cd web && bun install && bun run build')
 end
 
 ---@type table sd-tablet config root (configs/config.lua).
@@ -157,7 +159,7 @@ local function chooseRegisterUsable()
     end
 
     return function(item)
-        print(('^1[sd-tablet] no supported registration path for usable item %q - open it with the keybind.^0'):format(item))
+        lib.print.error(('no supported registration path for usable item %q - open it with the keybind.'):format(item))
     end
 end
 
@@ -187,8 +189,8 @@ CreateThread(function()
     for _ = 1, 30 do
         if simModeActive() then
             GlobalState.sdTabletSimMode = true
-            print('^3[sd-tablet]^0 sd-phone is running unique phones / SIM cards - the tablet acts '
-                .. 'as the SIM in the phone the player is carrying.')
+            lib.print.info('sd-phone is running unique phones / SIM cards - the tablet acts as the '
+                .. 'SIM in the phone the player is carrying.')
             return
         end
         Wait(2000)
@@ -244,11 +246,7 @@ end
 local function resolveOwnedColor(source, preferred)
     local colors = ownedColors(source)
     if #colors == 0 then return nil end
-    if preferred then
-        for i = 1, #colors do
-            if colors[i] == preferred then return preferred end
-        end
-    end
+    if preferred and lib.table.contains(colors, preferred) then return preferred end
     return colors[1]
 end
 
@@ -278,7 +276,7 @@ local function mayOpen(source, preferred)
     end
     local color = resolveOwnedColor(source, preferred)
     if color then return true, nil, color end
-    return false, 'You don\'t have a tablet.'
+    return false, locale('no_tablet')
 end
 
 ---Keybind open request; the item check is authoritative here because a client-side one is only a
@@ -432,6 +430,6 @@ exports('tabletColor', function(source)
 end)
 
 if not framework then
-    print('^1[sd-tablet] No supported framework detected (qbx_core / qb-core / es_extended). '
-        .. 'The item check will refuse every open.^0')
+    lib.print.error('No supported framework detected (qbx_core / qb-core / es_extended). '
+        .. 'The item check will refuse every open.')
 end
