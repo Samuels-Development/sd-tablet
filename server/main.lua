@@ -14,25 +14,9 @@ local PHONE <const> = 'sd-phone'
 -- ---------------------------------------------------------------------------
 -- Framework + inventory
 --
--- sd-phone has a full inventory bridge (bridge/server/inventory.lua) and this file needs two
--- lines of it: "does this player hold the item" and "run this when they use it". It is
--- deliberately NOT required across the resource boundary.
---
--- ox_lib's require DOES support it - `require '@sd-phone.bridge.server.inventory'` resolves,
--- because package.searchpath pulls the named resource out of the module path and LoadResourceFile
--- reads it, and nested requires inside the loaded chunk resolve back into sd-phone because the
--- chunk is loaded under an `@@sd-phone/...` name. It is still the wrong thing to do:
---
---   * package.loaded is per-Lua-state, so sd-tablet would get its own second copy of the module
---     and of everything it pulls in - re-running bridge/shared/framework.lua (which PRINTS a
---     "[SD-PHONE] Framework detected" banner and hard-errors when no framework is up) and
---     bridge/server/player.lua (which registers playerDropped and character-lifecycle handlers,
---     and would keep a second, redundant identity cache).
---   * it welds this resource to sd-phone's internal file layout, which is private and moves.
---
--- Two functions' worth of duplication is the cheaper trade. The backend list and the call shapes
--- are kept identical to sd-phone's bridge on purpose: if a server's inventory works there, it
--- works here.
+-- Two functions duplicated rather than required across the resource boundary: package.loaded is
+-- per-Lua-state, so requiring sd-phone's bridge would re-run its framework banner and register a
+-- second set of player handlers. Call shapes are kept identical to sd-phone's on purpose.
 -- ---------------------------------------------------------------------------
 
 ---@class TabletFramework
@@ -90,8 +74,7 @@ local function getPlayer(src)
     return framework.core.GetPlayerFromId(src)
 end
 
----Pick the inventory backend's count-of-item implementation once at load. Every path answers 0,
----never nil, when the player or item can't be resolved.
+---Picks the backend's count-of-item implementation once at load; every path answers 0, never nil.
 ---@return fun(source: number, item: string): number
 local function chooseCount()
     if active == 'ox_inventory' then
@@ -123,8 +106,7 @@ local function chooseCount()
         return function(src, item) return exports['qb-inventory']:GetItemCount(src, item) or 0 end
     end
 
-    -- ps-inventory / lj-inventory and the no-inventory-resource case all resolve through the
-    -- framework's own player object, which those forks keep authoritative.
+    -- ps/lj-inventory and the no-inventory case resolve through the framework's own player object.
     if framework and framework.name == 'esx' then
         return function(src, item)
             local p = getPlayer(src); if not p then return 0 end
@@ -145,9 +127,8 @@ end
 ---@type fun(source: number, item: string): number Backend item-count reader, bound once at load.
 local countItem = chooseCount()
 
----Pick the "register a usable item" implementation once at load. The ox path derives a per-item
----export ('tablet' -> 'useTablet') on THIS resource, which is why the ox_inventory item
----definition in the README points at `sd-tablet.useTablet`.
+---Picks the usable-item registrar once at load; the ox path derives a per-item export on THIS
+---resource ('tablet' -> 'useTablet'), which is what the README's ox_inventory definition points at.
 ---@return fun(item: string, cb: fun(source: number)): nil
 local function chooseRegisterUsable()
     if active == 'ox_inventory' then
@@ -186,14 +167,11 @@ local registerUsable = chooseRegisterUsable()
 -- ---------------------------------------------------------------------------
 -- SIM mode
 --
--- Under sd-phone's unique-phones/SIM mode the acting identity comes from the SIM in the player's
--- ACTIVE PHONE, so a tablet - which has no SIM tray and no device identity - has no identity to
--- act as. Rather than open a device that shows the wrong data, both open paths refuse.
---
--- isSimModeActive is a SERVER export, and sd-phone only flips the flag several seconds into boot,
--- after it has waited for the inventory to start and probed it for per-slot metadata support. So
--- the flag is polled until it settles rather than read once, and mirrored into global state for
--- the client, which has no export of its own to ask.
+-- No longer a refusal: the tablet borrows the identity of the SIM in the phone the player carries,
+-- exactly as it borrows everything else, so a request already answers as the right number. The flag
+-- survives only to reach the UI, which needs it to tell "no SIM" apart from "this server has none".
+-- sd-phone flips it seconds into boot behind an inventory probe, so it is polled until it settles
+-- and mirrored into global state for the client, which has no export of its own to ask.
 -- ---------------------------------------------------------------------------
 
 ---@return boolean
@@ -205,14 +183,12 @@ end
 
 CreateThread(function()
     GlobalState.sdTabletSimMode = false
-    -- 60s of polling covers sd-phone's own probe (up to ~10s of waiting for ox_inventory, plus a
-    -- schema ensure) with room to spare on a slow boot. The flag is set once and never cleared,
-    -- so the first true is final.
+    -- 60s covers sd-phone's own probe with room to spare; the first true is final.
     for _ = 1, 30 do
         if simModeActive() then
             GlobalState.sdTabletSimMode = true
-            print('^3[sd-tablet]^0 sd-phone is running unique phones / SIM cards - the tablet stays closed. '
-                .. 'A tablet has no SIM, so it has no identity to act as.')
+            print('^3[sd-tablet]^0 sd-phone is running unique phones / SIM cards - the tablet acts '
+                .. 'as the SIM in the phone the player is carrying.')
             return
         end
         Wait(2000)
@@ -221,27 +197,72 @@ end)
 
 -- ---------------------------------------------------------------------------
 -- Ownership
+--
+-- Resolving a colour searches the inventory once per configured item, and every caller is
+-- client-reachable at whatever rate it likes - so the OWNED SET is cached per player for a short
+-- window. The set rather than the resolved colour: caching the answer would key it on the
+-- client-supplied `preferred`, which a client could vary to miss the cache every time.
 -- ---------------------------------------------------------------------------
 
----The colour of a tablet item this player actually carries, preferring the one they last opened
----with so the keybind keeps handing back the same device.
+---@type integer ms an owned-colour set stays good for; long enough to collapse a burst.
+local OWNERSHIP_TTL <const> = 3000
+
+---@type table<number, { at: integer, colors: string[] }> Server id -> cached owned set.
+local ownershipCache = {}
+
+---Every configured colour this player currently carries, in config order.
+---@param source number player server id
+---@return string[] colors
+local function ownedColors(source)
+    local now = GetGameTimer()
+    local hit = ownershipCache[source]
+    if hit and now - hit.at < OWNERSHIP_TTL then return hit.colors end
+
+    local colors, seen = {}, {}
+    for _, entry in ipairs(cfg.Items or {}) do
+        -- Several items map to one colour, so a colour already found needs no second search.
+        if not seen[entry.color] and countItem(source, entry.item) > 0 then
+            seen[entry.color] = true
+            colors[#colors + 1] = entry.color
+        end
+    end
+
+    ownershipCache[source] = { at = now, colors = colors }
+    return colors
+end
+
+---Drops a player's cached owned set, so the next read goes back to the inventory.
+---@param source number player server id
+local function invalidateOwnership(source)
+    ownershipCache[source] = nil
+end
+
+---The colour this player carries, preferring their last-opened one so the keybind stays stable.
 ---@param source number player server id
 ---@param preferred string|nil last-used colour hint from the client
 ---@return string|nil color colour to open with, nil when no tablet item is owned
 local function resolveOwnedColor(source, preferred)
-    local items = cfg.Items or {}
+    local colors = ownedColors(source)
+    if #colors == 0 then return nil end
     if preferred then
-        for _, entry in ipairs(items) do
-            if entry.color == preferred and countItem(source, entry.item) > 0 then
-                return entry.color
-            end
+        for i = 1, #colors do
+            if colors[i] == preferred then return preferred end
         end
     end
-    for _, entry in ipairs(items) do
-        if countItem(source, entry.item) > 0 then return entry.color end
-    end
-    return nil
+    return colors[1]
 end
+
+---Clamps a client-supplied colour hint to something safe to compare against a config value.
+---@param value any
+---@return string|nil
+local function cleanColor(value)
+    if type(value) ~= 'string' or value == '' or #value > 32 then return nil end
+    return value
+end
+
+AddEventHandler('playerDropped', function()
+    invalidateOwnership(source)
+end)
 
 ---Whether a player may open a tablet right now, and in which colour.
 ---@param source number player server id
@@ -250,9 +271,8 @@ end
 ---@return string|nil message reason to show when refused
 ---@return string|nil color colour to open with
 local function mayOpen(source, preferred)
-    if simModeActive() then
-        return false, 'This server uses SIM cards - a tablet has no SIM. Use your phone.'
-    end
+    -- No SIM check: the identity comes from the SIM in the phone they carry, so this answers as
+    -- the right number either way, and with none the shared UI shows its own No Service screen.
     if not cfg.Items or cfg.RequireItem == false then
         return true, nil, resolveOwnedColor(source, preferred) or cfg.DefaultColor
     end
@@ -261,39 +281,137 @@ local function mayOpen(source, preferred)
     return false, 'You don\'t have a tablet.'
 end
 
----Keybind open request: may this player open a tablet, and in which colour? The client asks before
----every open, so the item check is authoritative in the only place it can be - a client-side check
----is a suggestion.
+---Keybind open request; the item check is authoritative here because a client-side one is only a
+---suggestion. `preferred` is client-supplied, so it is clamped and the cost bounded by the cache.
 lib.callback.register('sd-tablet:server:resolveOpen', function(source, preferred)
-    local ok, message, color = mayOpen(source, preferred)
+    local ok, message, color = mayOpen(source, cleanColor(preferred))
     return { ok = ok, message = message, color = color }
 end)
 
--- Boot: registers every usable tablet item once. Deferred a tick like sd-phone's, so the inventory
--- resource's own exports exist by the time we hand it a callback.
+-- ---------------------------------------------------------------------------
+-- Hold broadcast
+--
+-- Nearby clients weld a local prop copy off the replicated `sdTablet` player bag. The bag is
+-- written HERE because a client can write its own, so a client-written colour would be the item
+-- check with the item removed - and every change costs each observer a prop delete + spawn.
+-- Writes are coalesced rather than dropped: a stow arriving inside the window still has to land,
+-- or the prop is stranded in every observer's view until the player next opens the tablet.
+-- ---------------------------------------------------------------------------
+
+if cfg.PropVisibleToOthers then
+    ---@type integer Minimum ms between bag writes for one player; a real hold never bursts.
+    local HOLD_MIN_INTERVAL <const> = 400
+
+    ---@type table<string, true> Colours any configured item can open, for the no-item-check case.
+    local CONFIGURED_COLORS = {}
+    for _, entry in ipairs(cfg.Items or {}) do CONFIGURED_COLORS[entry.color] = true end
+    if cfg.DefaultColor then CONFIGURED_COLORS[cfg.DefaultColor] = true end
+
+    ---@class HoldState
+    ---@field at integer game time of the last write
+    ---@field value string|false what is on the bag now
+    ---@field pending string|false value waiting for the window to expire
+    ---@field hasPending boolean `pending` is meaningful (false is a legal value, so nil won't do)
+    ---@field queued boolean a timer is already armed to flush `pending`
+
+    ---@type table<number, HoldState>
+    local holdState = {}
+
+    ---Writes the bag and stamps the window.
+    ---@param src number
+    ---@param state HoldState
+    ---@param value string|false
+    local function applyHold(src, state, value)
+        state.at    = GetGameTimer()
+        state.value = value
+        Player(src).state:set('sdTablet', value, true)
+    end
+
+    ---Resolves what this player may claim to be holding.
+    ---@param src number
+    ---@param color any client-supplied colour, or false/nil to stow
+    ---@return string|false|nil value bag value to write, nil to ignore the request entirely
+    local function resolveHold(src, color)
+        if color == nil or color == false then return false end
+
+        local clean = cleanColor(color)
+        if not clean then return nil end
+
+        -- Item check off: any configured colour is an honest claim. On: they must hold it.
+        if not cfg.Items or cfg.RequireItem == false then
+            return CONFIGURED_COLORS[clean] and clean or nil
+        end
+        return resolveOwnedColor(src, clean) == clean and clean or false
+    end
+
+    RegisterNetEvent('sd-tablet:server:setHolding', function(color)
+        local src = source
+        local value = resolveHold(src, color)
+        if value == nil then return end
+
+        local state = holdState[src]
+        if not state then
+            state = { at = 0, value = false, hasPending = false, queued = false }
+            holdState[src] = state
+        end
+
+        -- Already what the bag says; costs observers nothing, so drop it whatever the rate.
+        if state.value == value then
+            state.hasPending = false
+            return
+        end
+
+        local wait = HOLD_MIN_INTERVAL - (GetGameTimer() - state.at)
+        if wait <= 0 then
+            state.hasPending = false
+            return applyHold(src, state, value)
+        end
+
+        -- Inside the window: keep the latest value and let one armed timer apply it.
+        state.pending    = value
+        state.hasPending = true
+        if state.queued then return end
+        state.queued = true
+        SetTimeout(wait, function()
+            local cur = holdState[src]
+            if not cur then return end
+            cur.queued = false
+            if not cur.hasPending then return end
+            cur.hasPending = false
+            local pending = cur.pending
+            if pending ~= cur.value then applyHold(src, cur, pending) end
+        end)
+    end)
+
+    AddEventHandler('playerDropped', function()
+        holdState[source] = nil
+    end)
+
+    -- Restarting leaves every holder's bag set with no observer left to clean it up.
+    AddEventHandler('onResourceStop', function(resource)
+        if resource ~= GetCurrentResourceName() then return end
+        for _, id in ipairs(GetPlayers()) do
+            local src = tonumber(id)
+            if src then Player(src).state:set('sdTablet', false, true) end
+        end
+    end)
+end
+
+-- Boot: registers every usable tablet item once, deferred a tick so the inventory's exports exist.
 CreateThread(function()
     Wait(50)
     if not cfg.Items then return end
     for _, entry in ipairs(cfg.Items) do
         registerUsable(entry.item, function(source)
-            -- No ownership check here: using the item IS the proof. The SIM refusal still applies,
-            -- and is answered with a toast rather than silence so the player knows why nothing
-            -- opened.
-            if simModeActive() then
-                TriggerClientEvent('ox_lib:notify', source, {
-                    title       = 'Tablet',
-                    description = 'This server uses SIM cards - a tablet has no SIM. Use your phone.',
-                    type        = 'error',
-                })
-                return
-            end
+            -- Using an item can consume or move it, so the cached set is now a guess.
+            invalidateOwnership(source)
+            -- No ownership check: using the item IS the proof.
             TriggerClientEvent('sd-tablet:client:openFromItem', source, entry.color)
         end)
     end
 end)
 
----Public export: does this player own a tablet - exports['sd-tablet']:hasTablet(source). Stays
----boolean rather than returning the colour, because callers already treat it as a yes/no.
+---Public export: does this player own a tablet - exports['sd-tablet']:hasTablet(source).
 ---@param source number player server id
 ---@return boolean
 exports('hasTablet', function(source)

@@ -106,10 +106,8 @@ return {
     PropOffset = vec3(0.0, 0.0, 0.0),
     PropRot    = vec3(0.0, 0.0, 0.0),
 
-    -- Let other players see the tablet in your hands. The holder broadcasts a replicated statebag
-    -- and every nearby client spawns its own LOCAL welded copy (the clip already replicates on
-    -- its own). Deliberately NOT a networked object: a networked prop's ownership can migrate to
-    -- another client whose sync then freezes it mid-hold. Set false for local-only.
+    -- Let other players see the tablet: the server ownership-checks the colour and writes a
+    -- replicated statebag, and every nearby client welds its own LOCAL copy off it.
     PropVisibleToOthers = true,
 
     -- Cosmetic status bar. The tablet keeps its OWN battery - it is a different device with a

@@ -1,23 +1,7 @@
--- sd-tablet client shell.
---
--- This resource contains no apps. sd-phone's client owns every NUI callback, every server
--- round-trip and every live push the shared React bundle needs, and the tablet borrows all of it
--- across the companion seam in sd-phone/client/companion.lua. What lives here is only what is
--- true of THIS DEVICE and nothing else:
---
---   * its own NUI frame, its own focus, its own open/close lifecycle
---   * the sd-phone:open payload that tells the shared bundle it is a tablet
---   * the hand prop and the hold clip
---   * device-local NUI callbacks (close, unlock, typing, flashlight...) that must never be
---     forwarded, or they would drive the phone's hardware from the tablet's screen
---
--- Everything else - messages, mail, contacts, installed apps, settings, the lot - is the same
--- server-side character on the same tables, reached through the same handlers. That is not a
--- synchronisation feature; there is only one copy of the data and both devices read it.
---
--- The one thing the tablet cannot do is place or answer a voice call. That refusal lives on
--- sd-phone's side of the seam (see its DENY list), so it holds even for a hand-edited build;
--- client/policy.lua repeats it here only so a refused action never leaves the resource.
+-- sd-tablet client shell: this device's NUI frame, focus, open/close lifecycle, hand prop, hold
+-- clip and the device-local callbacks that must never be forwarded. Every app, server round-trip
+-- and live push belongs to sd-phone and is borrowed across the companion seam - there is one copy
+-- of the data and both devices read it. Voice calls are refused on sd-phone's side of the seam.
 
 ---@type table sd-phone invoke transport (client.bridge): token-matched request/reply.
 local bridge = require 'client.bridge'
@@ -33,8 +17,7 @@ local cfg <const> = config.Tablet
 ---@type string The resource we borrow everything from.
 local PHONE <const> = 'sd-phone'
 
--- Apps disabled in configs/apps.lua never reach the NUI, so neither the home screen nor the App
--- Store can show them. Built once - the catalog is static per boot.
+-- Apps disabled in configs/apps.lua never reach the NUI; built once, the catalog is static per boot.
 ---@type table[] Enabled app entries, config order preserved.
 local ENABLED_APPS = {}
 ---@type string[] Dock ids with disabled apps dropped.
@@ -52,17 +35,13 @@ do
     end
 end
 
--- The catalog above is what this SERVER has; what this PLAYER may see also depends on the job they
--- hold, which only sd-phone's server knows. Asked on every open, so switching job on a multijob
--- server puts the right terminal on the home screen with no event to miss.
---
--- The callback is sd-phone's, called directly rather than through the companion seam: this decides
--- what goes INTO our open payload, so it has to be answered before the frame exists to forward
--- anything. A server without it (an older sd-phone) leaves the catalog untouched.
+-- What this PLAYER may see also depends on their job, which only sd-phone's server knows; asked on
+-- every open so a multijob switch needs no event. Called directly rather than through the seam,
+-- because it decides what goes INTO the open payload - an older sd-phone leaves the catalog alone.
 ---@return table[] apps
 ---@return string[] dock
 local function visibleApps()
-    local ok, hidden = pcall(lib.callback.await, 'sd-phone:server:apps:hidden', false)
+    local ok, hidden = pcall(lib.callback.await, 'sd-phone:server:apps:hidden', 5000)
     if not ok or type(hidden) ~= 'table' or #hidden == 0 then return ENABLED_APPS, ENABLED_DOCK end
 
     local drop = {}
@@ -79,9 +58,8 @@ local function visibleApps()
     return apps, dock
 end
 
--- Number display config for the NUI. Format keys are stringified deliberately: a Lua table whose
--- integer keys run contiguously from 1 encodes as a JSON ARRAY, which would land in the UI
--- off-by-one, so this guarantees an object either way. Same treatment as sd-phone's.
+-- Format keys are stringified so the table can never encode as a JSON array, which would land in
+-- the UI off-by-one. Same treatment as sd-phone's.
 ---@type { formats: table<string, string>, length: integer }
 local NUMBER_FORMAT = {}
 do
@@ -100,23 +78,21 @@ local tabletState = {
     battery = cfg.StatusBar.BatteryStart,
 }
 
----@type integer Wall-clock ms of the session start (re-stamped on character load); the Health
----app's "time awake" anchor. Stamped the same way sd-phone stamps its own, from the same events,
----so the two devices agree without either having to ask the other.
+---@type integer Session-start ms; the Health app's "time awake" anchor, stamped from the same
+---events sd-phone uses so the two devices agree without asking each other.
 local SESSION_START_MS = GetCloudTimeAsInt() * 1000
 
 ---@type boolean True while a UI text field is focused.
 local typingInTablet = false
----@type boolean True while the focused field is digit-only (PIN pads): keep-input stays on so the
----player can move, and the digit weapon binds are suppressed instead.
+---@type boolean True while the focused field is digit-only; keep-input stays on and the digit
+---weapon binds are suppressed instead, so the player can still move.
 local typingNumeric = false
 ---@type boolean True while the hold-to-look keybind has released the cursor for camera control.
 local lookMode = false
 ---@type boolean True while a forwarded sd-phone camera surface owns the view on our behalf.
 local cameraActive = false
----@type boolean True while that surface is framing with the REAR lens, i.e. the player - and
----anything in their hands - must stay out of their own shot. Tracked from the lens callback the UI
----forwards; see the rpc.watch wiring further down.
+---@type boolean True while that surface frames with the REAR lens, i.e. the player and anything in
+---their hands must stay out of the shot. Tracked from the rpc.watch wiring further down.
 local cameraRearLens = false
 ---@type boolean True while the Camera app has handed the mouse to the game to aim the lens.
 local cameraCursorFree = false
@@ -130,9 +106,7 @@ local function debugPrint(...)
     if config.Debug then print('[sd-tablet:client]', ...) end
 end
 
----Shows an on-screen toast. ox_lib is a hard dependency of both resources, so it is always the
----backend here - unlike sd-phone, which has a whole bridge because its notify reaches players
----from the server too.
+---Shows an on-screen toast; ox_lib is a hard dependency, so it is always the backend here.
 ---@param description string
 ---@param kind string|nil 'error' | 'inform' | 'success'
 local function notify(description, kind)
@@ -146,37 +120,27 @@ local function notify(description, kind)
     })
 end
 
----Calls an sd-phone client export, tolerating one that does not exist. Several readings the open
----payload wants (service bars, Wi-Fi networks) have exports; a couple do not yet, and calling a
----missing export raises rather than returning nil. Wrapping the call means a newer sd-phone that
----adds one is picked up with no change here, and an older one falls back to config.
+---Calls an sd-phone client export, tolerating one that does not exist - a missing export raises
+---rather than returning nil, so a newer sd-phone is picked up and an older one falls back to config.
 ---@param name string export name
 ---@param ... any arguments
 ---@return boolean ok, any value
+local function callPhoneExport(name, ...)
+    return exports[PHONE][name](exports[PHONE], ...)
+end
+
 local function phoneExport(name, ...)
     if GetResourceState(PHONE) ~= 'started' then return false, nil end
-    -- The INDEX is what raises on a missing export ("No such export x in resource y"), not the
-    -- call, so it has to happen inside the pcall - hence the closure rather than pcall'ing the
-    -- looked-up function directly.
-    local ok, res = pcall(function(...) return exports[PHONE][name](exports[PHONE], ...) end, ...)
+    local ok, res = pcall(callPhoneExport, name, ...)
     if not ok then return false, nil end
     return true, res
 end
 
 -------------------------------------------------------------------- capability reads
 
----Whether sd-phone is running unique phones / SIM cards.
----
----This is the one mode a tablet cannot participate in. Under SIM mode the acting identity is
----resolved from the SIM sitting in the player's ACTIVE PHONE, so every server callback the tablet
----forwards would answer for whichever phone they last opened - or for nothing at all if they are
----not carrying one. A tablet has no SIM tray and no device identity of its own, so rather than
----opening a device that shows the wrong player's data (or an empty one), it refuses.
----
----sd-phone exposes isSimModeActive as a SERVER export only, and the flag settles several seconds
----into boot behind an inventory-support probe. sd-tablet's server therefore publishes it as
----global state; the pcall'd client export is checked first so a future sd-phone that adds one
----takes precedence.
+---Whether sd-phone is running unique phones / SIM cards. Not a refusal - it rides in the open
+---payload so the shared UI can tell "no SIM in the phone you carry" apart from "this server has no
+---SIMs". Read from our server's global state, preferring a client export if a future sd-phone adds one.
 ---@return boolean
 local function simModeActive()
     local ok, res = phoneExport('isSimModeActive')
@@ -184,40 +148,53 @@ local function simModeActive()
     return GlobalState.sdTabletSimMode == true
 end
 
----Cosmetic signal bars for the status bar. sd-phone's live cell-service model owns the real
----number whenever masts are configured; with none, service is always full and the config value is
----the honest answer.
+---@type boolean|nil Whether sd-phone has cell masts configured; nil until answered.
+local towersConfigured = nil
+---@type boolean|nil Whether sd-phone has Wi-Fi networks configured; nil until answered.
+local wifiSystemOn = nil
+---@type boolean|nil Whether sd-phone reports Bluetooth configured; nil until answered.
+local bluetoothSystemOn = nil
+
+---Cosmetic signal bars; sd-phone's live model owns the real number whenever masts are configured.
 ---@return integer bars 0..4
 local function signalBars()
-    local ok, towers = phoneExport('getCellTowers')
-    if ok and type(towers) == 'table' and #towers > 0 then
+    if towersConfigured == nil then
+        local ok, towers = phoneExport('getCellTowers')
+        if ok then towersConfigured = type(towers) == 'table' and #towers > 0 end
+    end
+    if towersConfigured then
+        -- Not cached: this one is the LIVE reading, and it moves with the player.
         local gotBars, bars = phoneExport('getServiceBars')
         if gotBars and type(bars) == 'number' then return bars end
     end
     return cfg.StatusBar.SignalBars
 end
 
----Whether this server runs Wi-Fi at all (as opposed to whether the player is on it). Empty
----network list means the system is switched off in sd-phone's configs/wifi.lua.
+---Whether this server runs Wi-Fi at all; an empty network list means it is off in sd-phone's config.
 ---@return boolean
 local function wifiConfigured()
-    local ok, networks = phoneExport('getWifiNetworks')
-    return ok and type(networks) == 'table' and #networks > 0
+    if wifiSystemOn == nil then
+        local ok, networks = phoneExport('getWifiNetworks')
+        if ok then wifiSystemOn = type(networks) == 'table' and #networks > 0 end
+    end
+    return wifiSystemOn == true
 end
 
----Whether this server runs Bluetooth at all. No sd-phone export answers this today, so the config
----mirror is the fallback; see configs/tablet.lua.
+---Whether this server runs Bluetooth at all; no sd-phone export answers it yet, so config is used.
 ---@return boolean
 local function bluetoothConfigured()
-    local ok, res = phoneExport('isBluetoothConfigured')
-    if ok and type(res) == 'boolean' then return res end
+    if bluetoothSystemOn == nil then
+        local ok, res = phoneExport('isBluetoothConfigured')
+        if ok and type(res) == 'boolean' then bluetoothSystemOn = res end
+    end
+    if bluetoothSystemOn ~= nil then return bluetoothSystemOn end
     return cfg.StatusBar.BluetoothConfigured ~= false
 end
 
 -------------------------------------------------------------------- hold pose
 
----@type integer Flags for the reading pose: loop, resist interruption, upper body only, secondary
----task. Upper-body plus secondary is what leaves the legs free to walk.
+---@type integer Reading pose: LOOPING | NOT_INTERRUPTABLE | UPPERBODY | SECONDARY - the last two
+---are what leave the legs free to walk.
 local POSE_FLAGS <const> = 1 | 8 | 16 | 32
 ---@type integer|nil Handle of the attached tablet prop, nil while stowed.
 local prop = nil
@@ -225,32 +202,22 @@ local prop = nil
 ---@type string Colour the tablet is currently held in; always a key of TABLET_COLORS.
 local currentColor = cfg.DefaultColor or 'black'
 
----@type table<string, true> Colours any configured item can open, used to whitelist every colour
----that arrives from the server or off another player's statebag.
+---@type table<string, true> Whitelist for every colour arriving from the server or a statebag.
 local TABLET_COLORS = {}
 for _, entry in ipairs(cfg.Items or {}) do TABLET_COLORS[entry.color] = true end
 if not TABLET_COLORS[currentColor] then TABLET_COLORS[currentColor] = true end
 
----Whether sd-phone framed the current shot with the NATIVE cell-cam rather than with its own
----scripted camera. The two are nothing alike from this side: the native pins the ped at engine
----level, plays a pose of its own and spawns its own phone prop, while the scripted one only takes
----the view and leaves the ped entirely alone. So this one question answers both "must keep-input
----go off" and "must our hold pose stand down".
----
----sd-phone reaches for the native ONLY when the surface may not keep the player moving (its
----client/phonecam.lua movementAllowed), which under stock config is never - so `cameraActive`
----alone would stand the pose down for a camera that replaced nothing, deleting the tablet out of
----the player's hands mid-shot. It exposes no export for which camera won, so this reads the
----mirrored movement keys configs/tablet.lua already documents as having to match sd-phone's.
+---Whether sd-phone framed the shot with the NATIVE cell-cam, which pins the ped and spawns its own
+---prop, rather than its scripted camera, which leaves the ped alone. Answers both "must keep-input
+---go off" and "must our pose stand down". sd-phone only reaches for the native when the surface may
+---not keep the player moving, and exposes no export for it - hence the mirrored movement keys.
 ---@return boolean
 local function nativeCellCam()
     if not cameraActive then return false end
     return cfg.AllowMovement == false or cfg.AllowMovementInCamera == false
 end
 
----Whether the pose applies right now. It stands down only for the native cell-cam, whose own pose
----and own phone prop ours would fight - the same deference, and the same condition, as sd-phone's
----pose module.
+---Whether the pose applies; it stands down only for the native cell-cam, whose own pose ours fights.
 ---@return boolean
 local function shouldHold()
     if not cfg.HoldAnimation then return false end
@@ -258,18 +225,32 @@ local function shouldHold()
     return tabletState.open
 end
 
----Creates a tablet prop, disables its collision, and rigidly welds it to a ped's hand bone. Local
----to this client: cross-player visibility spawns one of these per nearby holder, never a networked
----object, because a networked prop's ownership can migrate to a client whose sync then freezes it.
+---@type table<integer, true> Models known not to be available on this client.
+local unavailableModels = {}
+
+---Welds a collision-free tablet prop to a ped's hand bone. Always LOCAL: a networked prop's
+---ownership can migrate to a client whose sync then freezes it mid-hold.
 ---@param ped integer ped to attach the prop to
 ---@param color string colour to weld; must be a key of TABLET_COLORS
 ---@return integer|nil prop the welded prop entity, or nil if the model wouldn't stream
 local function createProp(ped, color)
     local model = joaat(cfg.PropPrefix .. color)
-    RequestModel(model)
-    local started = GetGameTimer()
-    while not HasModelLoaded(model) and GetGameTimer() - started < 1000 do Wait(0) end
-    if not HasModelLoaded(model) then return nil end
+    if unavailableModels[model] then return nil end
+
+    -- Answers the props-resource-not-started case outright, with no request and no waiting.
+    if not IsModelInCdimage(model) then
+        unavailableModels[model] = true
+        return nil
+    end
+
+    -- lib.requestModel errors rather than returning on timeout, hence the pcall. Releasing on the
+    -- failure path matters: this branch can run repeatedly and would leak a streaming reference.
+    if not pcall(lib.requestModel, model, 1000) then
+        SetModelAsNoLongerNeeded(model)
+        unavailableModels[model] = true
+        return nil
+    end
+
     local coords = GetEntityCoords(ped)
     local obj = CreateObject(model, coords.x, coords.y, coords.z, false, true, true)
     SetEntityCollision(obj, false, false)
@@ -287,34 +268,53 @@ local function removeProp()
     prop = nil
 end
 
----Broadcasts the hold state via the replicated `sdTablet` player statebag: the held colour while
----holding, false otherwise, so nearby clients weld a matching copy. No-op when cross-player
----visibility is off.
+---@type string|false|nil Last hold state handed to the server; nil until the first broadcast.
+local lastHoldSent = nil
+
 local function broadcastHoldState()
     if not cfg.PropVisibleToOthers then return end
-    LocalPlayer.state:set('sdTablet', shouldHold() and currentColor or false, true)
+    local desired = shouldHold() and currentColor or false
+    if desired == lastHoldSent then return end
+    lastHoldSent = desired
+    TriggerServerEvent('sd-tablet:server:setHolding', desired)
 end
 
----Plays the hold clip and welds the prop, on its own thread: the pose is cosmetic and must never
----gate the tablet opening.
+---@type boolean True while a playPose thread is between requesting the model and taking the handle.
+local propPending = false
+
+---Plays the hold clip and welds the prop on its own thread; the pose must never gate the open.
 local function playPose()
     CreateThread(function()
-        RequestAnimDict(cfg.AnimDict)
-        local started = GetGameTimer()
-        while not HasAnimDictLoaded(cfg.AnimDict) and GetGameTimer() - started < 1000 do Wait(0) end
-        -- The player may have closed the tablet, or the cell-cam taken the pose, during the load.
-        if not shouldHold() then return end
-        local ped = PlayerPedId()
+        local ped = cache.ped
         if not IsEntityPlayingAnim(ped, cfg.AnimDict, cfg.AnimName, 3) then
-            TaskPlayAnim(ped, cfg.AnimDict, cfg.AnimName, 8.0, -8.0, -1, POSE_FLAGS, 0.0, false, false, false)
+            -- lib.playAnim loads AND releases the dict; it errors when the clip never streams.
+            if not pcall(lib.playAnim, ped, cfg.AnimDict, cfg.AnimName, 8.0, -8.0, -1, POSE_FLAGS) then
+                return
+            end
         end
-        if not (prop and DoesEntityExist(prop)) then prop = createProp(ped, currentColor) end
+        -- That load yields, so the player may have closed the tablet or the cell-cam taken over.
+        if not shouldHold() then
+            StopAnimTask(ped, cfg.AnimDict, cfg.AnimName, 1.0)
+            return
+        end
+        if prop and DoesEntityExist(prop) then return end
+        if propPending then return end
+        propPending = true
+        -- Re-read rather than reuse `ped`: cache.ped is current across the yield above.
+        local obj = createProp(cache.ped, currentColor)
+        propPending = false
+        if not obj then return end
+        if not shouldHold() or (prop and DoesEntityExist(prop)) then
+            DeleteObject(obj)
+            return
+        end
+        prop = obj
     end)
 end
 
 ---Stops our clip and removes the prop.
 local function stopPose()
-    local ped = PlayerPedId()
+    local ped = cache.ped
     if IsEntityPlayingAnim(ped, cfg.AnimDict, cfg.AnimName, 3) then
         StopAnimTask(ped, cfg.AnimDict, cfg.AnimName, 1.0)
     end
@@ -327,22 +327,25 @@ local function updatePose()
     broadcastHoldState()
 end
 
--- Re-applies the held clip on a 500ms poll if the game clears it. Movement is what clears it: an
--- upper-body secondary task loses to sprints, jumps and vehicle transitions, and this device is
--- explicitly usable while walking.
+-- Re-applies the held clip if the game clears it: an upper-body secondary task loses to sprints,
+-- jumps and vehicle transitions, and this device is explicitly usable while walking. Backs off to
+-- a 1s tick while stowed, since the thread lives for the whole session either way.
 CreateThread(function()
     while true do
-        if shouldHold() and not IsEntityPlayingAnim(PlayerPedId(), cfg.AnimDict, cfg.AnimName, 3) then
-            playPose()
+        if not tabletState.open then
+            Wait(1000)
+        else
+            if shouldHold() and not IsEntityPlayingAnim(cache.ped, cfg.AnimDict, cfg.AnimName, 3) then
+                playPose()
+            end
+            Wait(500)
         end
-        Wait(500)
     end
 end)
 
--- Keeps the tablet out of the player's own rear shot. sd-phone hides the holder for exactly this
--- reason and hides ITS prop on the next line (client/pose.lua), because hiding a ped does not hide
--- what is attached to it - and our prop is a separate entity, spawned by a separate resource, so
--- its hide never covers ours. Locally invisible lasts one frame, hence the per-frame re-assert.
+-- Keeps the tablet out of the player's own rear shot. Hiding a ped does not hide what is attached
+-- to it, and our prop is a separate resource's entity, so sd-phone's own hide never covers it.
+-- SetEntityLocallyInvisible lasts one frame, hence the per-frame re-assert.
 CreateThread(function()
     while true do
         if cameraActive and cameraRearLens and prop and DoesEntityExist(prop) then
@@ -360,74 +363,90 @@ end)
 ---AllowMovement on.
 local function syncKeepInput()
     if tabletState.open and cfg.AllowMovement then
-        -- The native cell-cam pins the ped at engine level whatever keep-input says, so keeping it
-        -- on there would only leak the movement keys into the game underneath a frozen player.
+        -- The native cell-cam pins the ped anyway, so keep-input there only leaks movement keys.
         SetNuiFocusKeepInput((not typingInTablet or typingNumeric) and not nativeCellCam())
     end
 end
 
----@type boolean True while the movement-suppression thread is running.
-local movementThreadRunning = false
+---@type boolean True while the per-frame input thread is running.
+local inputThreadRunning = false
 
----Runs one thread per open that suppresses combat, mouse-look, weapon-wheel and chat controls
----each frame, and closes the tablet when the pause menu activates. Mirrors sd-phone's, because
----the two devices share a UI and must not feel different to hold.
-local function startMovementThread()
-    if not cfg.AllowMovement or movementThreadRunning then return end
-    movementThreadRunning = true
+---Runs ONE per-frame thread per open: holds the pause control down unconditionally, and with
+---AllowMovement on also suppresses combat, mouse-look, weapon-wheel and chat as sd-phone does.
+local function startInputThread()
+    if inputThreadRunning then return end
+    inputThreadRunning = true
     CreateThread(function()
-        while tabletState.open do
-            if IsPauseMenuActive() then
-                CloseTablet()
-            elseif (not typingInTablet or typingNumeric) and not nativeCellCam() then
-                DisablePlayerFiring(PlayerId(), true)
-                -- The Camera app's Alt toggle hands the mouse to the game to aim the lens, so
-                -- leave mouse-look alone while it has: suppressing it makes the lens immovable.
-                if not lookMode and not cameraCursorFree then
-                    DisableControlAction(0, 1, true)
-                    DisableControlAction(0, 2, true)
-                end
-                DisableControlAction(0, 24, true)
-                DisableControlAction(0, 25, true)
-                DisableControlAction(0, 257, true)
-                DisableControlAction(0, 263, true)
-                DisableControlAction(0, 264, true)
-                DisableControlAction(0, 140, true)
-                DisableControlAction(0, 141, true)
-                DisableControlAction(0, 142, true)
-                DisableControlAction(0, 143, true)
-                DisableControlAction(0, 37, true)
-                DisableControlAction(0, 106, true)
-                DisableControlAction(0, 245, true)
-                DisableControlAction(0, 246, true)
-                -- Scroll-wheel fall-throughs under keep-input: the UI owns the wheel, so vehicle
-                -- radio cycling, the radio wheel and weapon cycling must not react.
-                DisableControlAction(0, 14, true)
-                DisableControlAction(0, 15, true)
-                DisableControlAction(0, 16, true)
-                DisableControlAction(0, 17, true)
-                DisableControlAction(0, 81, true)
-                DisableControlAction(0, 82, true)
-                DisableControlAction(0, 83, true)
-                DisableControlAction(0, 84, true)
-                DisableControlAction(0, 85, true)
-                DisableControlAction(0, 99, true)
-                DisableControlAction(0, 100, true)
-                if typingNumeric then
-                    -- Digit pad up: the number row must not fire GTA weapon-slot binds.
-                    for control = 157, 166 do
-                        DisableControlAction(0, control, true)
+        -- Outer loop so a reopen DURING the trailing hold below rejoins instead of dying with the
+        -- flag about to clear, which would leave an open tablet suppressing nothing.
+        while true do
+            while tabletState.open do
+                DisableControlAction(0, 199, true) -- INPUT_FRONTEND_PAUSE
+                DisableControlAction(0, 200, true) -- INPUT_FRONTEND_PAUSE_ALTERNATE
+
+                if cfg.AllowMovement then
+                    if IsPauseMenuActive() then
+                        CloseTablet()
+                    elseif (not typingInTablet or typingNumeric) and not nativeCellCam() then
+                        DisablePlayerFiring(cache.playerId, true)
+                        -- The Camera app's Alt toggle aims the lens with the mouse; suppressing
+                        -- mouse-look while it has would make the lens immovable.
+                        if not lookMode and not cameraCursorFree then
+                            DisableControlAction(0, 1, true)
+                            DisableControlAction(0, 2, true)
+                        end
+                        DisableControlAction(0, 24, true)
+                        DisableControlAction(0, 25, true)
+                        DisableControlAction(0, 257, true)
+                        DisableControlAction(0, 263, true)
+                        DisableControlAction(0, 264, true)
+                        DisableControlAction(0, 140, true)
+                        DisableControlAction(0, 141, true)
+                        DisableControlAction(0, 142, true)
+                        DisableControlAction(0, 143, true)
+                        DisableControlAction(0, 37, true)
+                        DisableControlAction(0, 106, true)
+                        DisableControlAction(0, 245, true)
+                        DisableControlAction(0, 246, true)
+                        -- Scroll-wheel fall-throughs under keep-input: the UI owns the wheel.
+                        DisableControlAction(0, 14, true)
+                        DisableControlAction(0, 15, true)
+                        DisableControlAction(0, 16, true)
+                        DisableControlAction(0, 17, true)
+                        DisableControlAction(0, 81, true)
+                        DisableControlAction(0, 82, true)
+                        DisableControlAction(0, 83, true)
+                        DisableControlAction(0, 84, true)
+                        DisableControlAction(0, 85, true)
+                        DisableControlAction(0, 99, true)
+                        DisableControlAction(0, 100, true)
+                        if typingNumeric then
+                            -- Digit pad up: the number row must not fire GTA weapon-slot binds.
+                            for control = 157, 166 do
+                                DisableControlAction(0, control, true)
+                            end
+                        end
                     end
                 end
+                Wait(0)
             end
-            Wait(0)
+
+            -- Held a few frames past the close, or the closing keypress opens the escape menu.
+            local held = 0
+            while held < 15 and not tabletState.open do
+                DisableControlAction(0, 199, true)
+                DisableControlAction(0, 200, true)
+                held = held + 1
+                Wait(0)
+            end
+            if not tabletState.open then break end
         end
-        movementThreadRunning = false
+        -- No yield since the break, so an open cannot be refused by a flag about to clear.
+        inputThreadRunning = false
     end)
 end
 
----Enters look mode: releases the NUI cursor so the mouse rotates the camera while the tablet
----stays on screen. This is how a walking player aims the lens in the forwarded Camera app -
+---Releases the NUI cursor so the mouse rotates the camera with the tablet still on screen;
 ---sd-phone's own look keybind only answers while the PHONE is open, so this device needs its own.
 local function enterLookMode()
     if lookMode or not tabletState.open or not cfg.AllowMovement then return end
@@ -440,16 +459,14 @@ end
 local function exitLookMode()
     if not lookMode then return end
     lookMode = false
-    -- Never grab the cursor back while the Camera app has deliberately released it, or its own
-    -- cursorOn flag desyncs and the viewfinder's key relays go dead.
+    -- Never grab the cursor back while the Camera app has released it, or its cursorOn desyncs.
     if tabletState.open and not cameraCursorFree then
         SetNuiFocus(true, true)
         syncKeepInput()
     end
 end
 
--- sd-phone announces the cell-cam's state as plain client events, so the tablet hears them
--- without any wiring on the other side: the Camera app it drives is OUR screen's.
+-- sd-phone announces cell-cam state as plain client events, so we hear them with no wiring there.
 ---@param on any truthy while the cell-cam view is live
 AddEventHandler('sd-phone:client:cameraMode', function(on)
     if not tabletState.open then return end
@@ -471,9 +488,8 @@ end)
 
 -------------------------------------------------------------------- open / close
 
----Builds the tablet's sd-phone:open payload. Same shape as sd-phone's OpenPhone, from the tablet's
----own config, with the phone app absent from both the dock and the catalog and the SIM block
----always disabled - a tablet has no tray, and SIM mode refuses to open one at all.
+---Builds the sd-phone:open payload: OpenPhone's shape from the tablet's own config, with the phone
+---app absent from the dock and catalog.
 ---@return table
 local function openPayload()
     local apps, dock = visibleApps()
@@ -503,21 +519,10 @@ local function openPayload()
 end
 
 ---Fetches the acting character's installed apps + home layout and pushes them into the open NUI.
----
----Routed through the seam rather than straight to sd-phone's server callback on purpose: sd-phone
----resolves WHOSE apps these are from the acting identity, and going through its own NUI handler
----means the tablet can never resolve that differently from the phone. This is the payload that
----makes the two devices the same device - an app installed on the phone is on the tablet the next
----time it opens, because there is only one installed list.
----
----The installed list is genuinely shared; the home LAYOUT is not, because a layout only means
----anything against the grid it was arranged on - 36 icons to a page here against the phone's 24.
----So one stored column holds an envelope, { devices = { phone = '...', tablet = '...' } }, written
----per device by sd-phone's server (server/apps/actions.lua) off the `device` the UI sends with
----each save, and unwrapped by the SHARED bundle, which knows its own id (web/src/apps/appstore/
----appsApi.ts, parseLayout). Neither end of that is ours to second-guess: the layout goes through
----this push exactly as the server stored it, envelope and all, and our copy of the bundle takes
----the tablet slice out of it. Slicing or namespacing anything here would break both devices.
+---Routed through the seam so the tablet can never resolve WHOSE apps these are differently from
+---the phone. The installed list is genuinely shared; the home LAYOUT is not (36 icons to a page
+---here against the phone's 24), so it travels as a per-device envelope that the SHARED bundle
+---unwraps by its own id. The layout is pushed exactly as stored - slicing it here breaks both.
 local function pushInstalledApps()
     bridge.invoke('sd-phone:apps:list', {}, function(res)
         if not tabletState.open then return end
@@ -532,9 +537,8 @@ local function pushInstalledApps()
     end)
 end
 
----Pulls one weather + world-time snapshot and pushes it in. sd-phone's 5s poll already covers a
----companion device, but waiting up to five seconds for the Weather app to paint on open is a
----visible stall, so the first snapshot is asked for directly.
+---Pulls one weather snapshot directly; sd-phone's 5s poll covers us after, but waiting that long
+---for the Weather app to paint on open is a visible stall.
 local function pushWeather()
     bridge.invoke('sd-phone:weather:get', {}, function(res)
         if not tabletState.open or type(res) ~= 'table' then return end
@@ -542,68 +546,70 @@ local function pushWeather()
     end)
 end
 
----Opens the tablet NUI, arms the mirror, and takes the screen from the phone if it had it.
----Refuses while dead, swimming, driving, disabled, or in SIM mode.
----@return boolean opened
-local function OpenTablet()
+---Whether the tablet may go on screen. Every condition is re-readable: the open path checks them
+---again after the payload round-trip, which is long enough to die, dive in or take a wheel.
+---@return boolean ok
+---@return string|nil message reason to show when refused
+local function canOpen()
     if tabletState.open then return false end
 
     if GetResourceState(PHONE) ~= 'started' then
-        notify('The tablet can\'t connect right now.', 'error')
-        return false
+        return false, 'The tablet can\'t connect right now.'
     end
 
-    -- One switch disables both devices: a script that takes the player's phone away (a scene, a
-    -- cell, a cutscene) means them to have no screen at all, not a spare one.
+    -- One switch disables both devices: a script taking the phone away means no screen, not a spare.
     local gotDisabled, disabled = phoneExport('isDisabled')
     if gotDisabled and disabled == true then
-        notify('You can\'t use your tablet right now.', 'error')
+        return false, 'You can\'t use your tablet right now.'
+    end
+
+    -- No SIM check: the tablet borrows the identity of the SIM in the phone you carry, exactly as
+    -- it borrows everything else, so a request already answers as the right number. With no SIM
+    -- the shared UI shows its own No Service screen, the same as the phone does.
+    if cfg.BlockWhileDead and IsEntityDead(cache.ped) then
+        return false, 'You can\'t use your tablet right now.'
+    end
+    if cfg.BlockWhileSwimming and IsPedSwimming(cache.ped) then
+        return false, 'You can\'t use your tablet while swimming.'
+    end
+    -- cache.vehicle is false on foot; seat -1 is the driver's.
+    if cfg.BlockWhileDriving and cache.vehicle and cache.seat == -1 then
+        return false, 'Not while you\'re driving.'
+    end
+
+    return true
+end
+
+---Opens the tablet NUI, arms the mirror, and takes the screen from the phone if it had it.
+---Refuses while dead, swimming, driving, or disabled.
+---@return boolean opened
+local function OpenTablet()
+    local ok, message = canOpen()
+    if not ok then
+        if message then notify(message, 'error') end
         return false
     end
 
-    -- SIM servers used to refuse outright, which left the tablet unusable on every one of them.
-    -- It has no SIM of its own and never will: it borrows the identity of the SIM in the phone
-    -- you are carrying, exactly as it borrows everything else. sd-phone resolves that per PLAYER,
-    -- so a tablet request already answers as the right number. With no SIM the shared UI shows
-    -- its own No Service screen, the same as the phone does.
+    -- Built BEFORE anything is committed: openPayload yields on a server round-trip, and taking
+    -- focus or arming the mirror first would leave the player behind a cursor with nothing on
+    -- screen for its duration. The lock flag is stamped first because the payload carries it.
+    tabletState.locked = cfg.StartLocked ~= false
+    local payload = openPayload()
 
-    local ped = PlayerPedId()
-    if cfg.BlockWhileDead and IsEntityDead(ped) then
-        notify('You can\'t use your tablet right now.', 'error')
-        return false
-    end
-    if cfg.BlockWhileSwimming and IsPedSwimming(ped) then
-        notify('You can\'t use your tablet while swimming.', 'error')
-        return false
-    end
-    if cfg.BlockWhileDriving and IsPedInAnyVehicle(ped, false)
-        and GetPedInVehicleSeat(GetVehiclePedIsIn(ped, false), -1) == ped then
-        notify('Not while you\'re driving.', 'error')
+    -- Re-run across that yield: the player can die, dive in or take a wheel while the server answers.
+    local stillOk, lateMessage = canOpen()
+    if not stillOk then
+        if lateMessage then notify(lateMessage, 'error') end
         return false
     end
 
-    -- One device at a time: the phone gives up the screen here, so focus, the cell-cam and
-    -- pma-voice only ever have one owner. sd-phone does the mirror image of this in OpenPhone.
+    -- One device at a time, so focus, the cell-cam and pma-voice only ever have one owner.
     exports[PHONE]:close()
 
-    tabletState.open   = true
-    tabletState.locked = cfg.StartLocked ~= false
+    tabletState.open = true
 
     mirror.arm(true)
     mirror.setCompanionOpen(true)
-
-    CreateThread(function()
-        while tabletState.open do
-            DisableControlAction(0, 199, true) -- INPUT_FRONTEND_PAUSE
-            DisableControlAction(0, 200, true) -- INPUT_FRONTEND_PAUSE_ALTERNATE
-            Wait(0)
-        end
-        for _ = 1, 15 do
-            DisableControlAction(0, 199, true)
-            DisableControlAction(0, 200, true)
-            Wait(0)
-        end
-    end)
 
     updatePose()
 
@@ -612,25 +618,20 @@ local function OpenTablet()
         typingInTablet = false
         typingNumeric  = false
         SetNuiFocusKeepInput(true)
-        startMovementThread()
     end
+    startInputThread()
 
-    SendNUIMessage({ action = 'sd-phone:open', data = openPayload() })
+    SendNUIMessage({ action = 'sd-phone:open', data = payload })
     SendNUIMessage({ action = 'sd-phone:session', data = { startMs = SESSION_START_MS } })
 
-    -- "A device of ours is on screen." sd-phone's own modules key several live feeds off this
-    -- event, and every one of them is about the player rather than the handset: the cell-service
-    -- and Wi-Fi scans only tick while a device is up, Health only pushes vitals while one is up,
-    -- and - decisively - the Camera app restores NUI focus on exit ONLY if it believes a device is
-    -- watching. Without this, leaving the viewfinder on the tablet strands the player with no
-    -- cursor. The event is local, so announcing it is the supported way to say so.
+    -- "A device of ours is on screen": sd-phone keys its cell-service, Wi-Fi and Health feeds off
+    -- this, and the Camera app restores NUI focus on exit ONLY if it believes a device is watching.
     TriggerEvent('sd-phone:client:openState', true)
 
     -- AirShare presence: players appear in each other's share sheets while a device is out.
     TriggerServerEvent('sd-phone:server:phone:setOpen', true)
 
-    -- Both need a round-trip, and the tablet is already on screen behind the lockscreen, so they
-    -- land as follow-ups rather than gating the reveal.
+    -- Both need a round-trip and the lockscreen is already up, so they follow rather than gate it.
     pushWeather()
     pushInstalledApps()
 
@@ -650,9 +651,7 @@ function CloseTablet()
     cameraRearLens   = false
     cameraCursorFree = false
 
-    -- Stand the seam down first. Leaving either flag set makes sd-phone keep firing a client
-    -- event for every push it makes, keep pumping its weather poll, and keep handing us focus
-    -- calls meant for a screen that is no longer there.
+    -- Seam down first, or sd-phone keeps mirroring pushes and focus at a screen that is gone.
     mirror.setCompanionOpen(false)
     mirror.arm(false)
 
@@ -667,52 +666,33 @@ function CloseTablet()
     debugPrint('tablet closed')
 end
 
--- sd-phone opening its own phone tells every companion to stand down (client/main.lua fires this
--- at the top of OpenPhone, before it takes focus). This is the other half of the exclusion the
--- open path above starts.
+-- sd-phone fires this at the top of OpenPhone: the other half of the exclusion our open starts.
 AddEventHandler('sd-phone:client:companion:close', function()
     CloseTablet()
 end)
 
----The admin panel is a second surface inside sd-phone's OWN frame, and it opens by taking NUI
----focus for itself (its client/admin.lua) before pushing itself in. Neither half survives a
----companion holding the screen: the focus call is re-routed to us by the seam, and the push is
----dropped here because this device's build has no panel to receive it - so the panel would render
----in a frame nobody is looking at while the cursor sat on ours, and nothing would be clickable
----until the tablet was closed. So give the screen up for it exactly as we do for the phone.
----
----Both cross-resource orderings land correctly, because CloseTablet clears the companion flag
----BEFORE it announces sd-phone:client:openState(false):
----  * sd-phone first - it takes focus (routed to a tablet that is about to close) and pushes the
----    panel (dropped at our mirror); our close then fires openState(false), and sd-phone's admin
----    handler re-asserts focus on that event with the seam already down, so it lands on its frame.
----  * us first - the seam is down before sd-phone's handler runs, so its focus call is never
----    routed anywhere and lands on its own frame directly.
----Either way the panel and the cursor end up in the same frame.
+---The admin panel is a surface inside sd-phone's OWN frame, and neither its focus call (re-routed
+---to us by the seam) nor its push (dropped here, we have no panel) survives a companion holding
+---the screen - so give the screen up for it exactly as we do for the phone. Either cross-resource
+---ordering lands, because CloseTablet clears the companion flag before announcing openState(false).
 RegisterNetEvent('sd-phone:client:admin:open', function()
     CloseTablet()
 end)
 
--- Teardown of the SHARED profile. Both of these are pushed by sd-phone into its own frame, and
--- both fire at moments when neither device need be on screen - which is exactly when the mirror is
--- disarmed, so neither would ever reach us. Our NUI is loaded from resource start and keeps
--- running hidden, so a missed teardown leaves it to reopen on the previous profile's cached data.
--- Registering the two net events ourselves is the only delivery that does not depend on being
--- visible; the matching pushes are dropped at the mirror (client/policy.lua), which is what stops
--- an OPEN tablet handling each of them twice.
+-- Teardown of the SHARED profile. Both fire when neither device need be on screen, i.e. exactly
+-- when the mirror is disarmed - and our hidden NUI would then reopen on stale data. Registering
+-- the net events ourselves is the only delivery that does not depend on being visible; the
+-- matching pushes are dropped at the mirror so an OPEN tablet never handles them twice.
 
----A cloud-backup restore replaced the acting profile's data in place: the NUI drops every cached
----trace (kept-alive apps, hydrated settings, data stores) and rehydrates. The installed-apps
----follow-up re-runs with it, since a restore changes both the installed list and the home layout.
+---A cloud-backup restore replaced the profile's data in place: drop every cached trace and
+---rehydrate. Installed apps re-run with it, since a restore changes the list and the layout.
 RegisterNetEvent('sd-phone:client:profileReset', function()
     SendNUIMessage({ action = 'sd-phone:profileReset' })
     if tabletState.open then pushInstalledApps() end
 end)
 
----An admin wipe tells the React app to clear its local storage and RELOAD, which tears our UI down
----to an empty page. A device left flagged open behind an empty page holds focus with nothing on
----screen to release it and refuses to reopen, so it stands down first - and the focus drop trails
----the push for the same reason sd-phone's does: the reloaded frame must not inherit one.
+---An admin wipe reloads the React app to an empty page; a device left flagged open behind it holds
+---focus with nothing to release it, so it stands down first and the focus drop trails the push.
 RegisterNetEvent('sd-phone:client:wipe', function()
     CloseTablet()
     SendNUIMessage({ action = 'sd-phone:wipe' })
@@ -721,15 +701,15 @@ end)
 
 -------------------------------------------------------------------- entry points
 
----Keybind toggle: closes when open, otherwise asks the server whether this player may open one.
----Ownership is server-authoritative for the same reason sd-phone's is - the item check is the
----only thing standing between a keybind and a free tablet.
+---Keybind toggle; ownership is server-authoritative because the item check is the only thing
+---standing between a keybind and a free tablet.
 local function ToggleTablet()
     if tabletState.open then CloseTablet() return end
 
-    -- The last-used colour rides along as a hint so the keybind keeps handing back the same
-    -- tablet; the server only honours it while that item is still owned.
-    local res = lib.callback.await('sd-tablet:server:resolveOpen', false, currentColor)
+    -- The last-used colour is a hint the server only honours while that item is still owned. The
+    -- await is bounded because an unbounded one never returns if our server is mid-restart, and a
+    -- timeout resolves to nil - which the type check below already reports as a refusal.
+    local res = lib.callback.await('sd-tablet:server:resolveOpen', 10000, currentColor)
     if type(res) ~= 'table' or res.ok ~= true then
         notify((type(res) == 'table' and res.message) or 'You don\'t have a tablet.', 'error')
         return
@@ -738,19 +718,24 @@ local function ToggleTablet()
     OpenTablet()
 end
 
--- Keybind wiring; the `-` command is the no-op release half of the +command mapping.
-RegisterCommand('+sdtablet_toggle', ToggleTablet, false)
-RegisterCommand('-sdtablet_toggle', function() end, false)
-RegisterKeyMapping('+sdtablet_toggle', 'Toggle Tablet', 'keyboard', cfg.Keybind)
+lib.addKeybind({
+    name        = 'sdtablet_toggle',
+    description = 'Toggle Tablet',
+    defaultKey  = cfg.Keybind,
+    onPressed   = ToggleTablet,
+})
 
--- Hold-to-look: the +command frees the mouse for camera rotation, the -command restores the cursor.
-RegisterCommand('+sdtablet_look', enterLookMode, false)
-RegisterCommand('-sdtablet_look', exitLookMode, false)
-RegisterKeyMapping('+sdtablet_look', 'Tablet: Hold to look around', 'keyboard', cfg.LookKeybind)
+-- Hold-to-look: press frees the mouse for camera rotation, release restores the cursor.
+lib.addKeybind({
+    name        = 'sdtablet_look',
+    description = 'Tablet: Hold to look around',
+    defaultKey  = cfg.LookKeybind,
+    onPressed   = enterLookMode,
+    onReleased  = exitLookMode,
+})
 
----Opens the tablet after a tablet item is used, in that item's colour. The server has already
----resolved ownership by definition - it is the item's own use callback that fired this. The colour
----is whitelist-checked because it arrives over the network.
+---Opens after an item is used, in its colour; ownership is proven by the use callback firing at
+---all, and the colour is whitelist-checked because it arrives over the network.
 ---@param color string|nil colour of the item that was used
 RegisterNetEvent('sd-tablet:client:openFromItem', function(color)
     if color and TABLET_COLORS[color] then currentColor = color end
@@ -759,10 +744,8 @@ end)
 
 -------------------------------------------------------------------- device-local NUI handlers
 
--- Every one of these is an action the shared UI performs on the DEVICE it is running on. Each has
--- a counterpart in sd-phone/client/main.lua that does the same job for the phone; forwarding any
--- of them would run the phone's version against a frame nobody is looking at. client/policy.lua
--- lists them and client/rpc.lua refuses to bind unless all of them exist.
+-- Actions the shared UI performs on the DEVICE it runs on; forwarding any would run sd-phone's
+-- counterpart against a frame nobody is looking at. rpc.lua refuses to bind unless all exist.
 ---@type table<string, fun(payload: any, cb: fun(result: any))>
 local LOCAL_HANDLERS = {
     ---React to Lua: the NUI requests the device be closed (swipe down / back gesture).
@@ -771,7 +754,8 @@ local LOCAL_HANDLERS = {
         cb({ ok = true })
     end,
 
-    ---React to Lua: unlock gesture finished. Clears the locked flag; it re-arms on the next open.
+    ---React to Lua: unlock gesture finished; re-arms on the next open. No passcode check belongs
+    ---here - the React app compares it, and the lockscreen is privacy, not a security boundary.
     ['sd-phone:unlock'] = function(_, cb)
         tabletState.locked = false
         cb({ ok = true })
@@ -783,9 +767,8 @@ local LOCAL_HANDLERS = {
         cb({ ok = true })
     end,
 
-    ---React to Lua: a text field gained or lost focus. Full typing releases keep-input so keys
-    ---reach only the field; numeric typing (PIN pads) keeps it so the player can still move, with
-    ---the digit weapon binds suppressed by the movement thread instead.
+    ---React to Lua: a text field gained or lost focus. Full typing releases keep-input; numeric
+    ---typing keeps it, with the digit weapon binds suppressed by the input thread instead.
     ---@param data table|nil { typing: boolean, numeric: boolean }
     ['sd-phone:typing'] = function(data, cb)
         typingInTablet = data and data.typing and true or false
@@ -801,9 +784,8 @@ local LOCAL_HANDLERS = {
         cb({ ok = true })
     end,
 
-    ---React to Lua: lockscreen torch button. A tablet has no torch, so the beam is always off -
-    ---answered rather than denied, because the lockscreen asks unprompted and a refusal would
-    ---surface as an error toast for a button the player never pressed.
+    ---React to Lua: lockscreen torch. A tablet has none, so it is answered rather than denied -
+    ---the lockscreen asks unprompted, and a refusal would toast for a button nobody pressed.
     ['sd-phone:flashlight:toggle'] = function(_, cb)
         cb({ on = false })
     end,
@@ -819,12 +801,8 @@ if config.Debug then
     rpc.setTrace(function(kind, action) debugPrint(kind, action) end)
 end
 
--- Which lens the forwarded Camera app is framing with. sd-phone announces the viewfinder opening
--- and closing as client events, but the FLIP only ever travels page -> Lua as this callback, so
--- watching it on its way through is the one place this side can learn the lens. The app always
--- enters on the rear one (its enterCameraView resets frontCam), and both ways to flip - the
--- on-screen button and the Up-arrow that sd-phone relays into the page - end here, so there is no
--- second path to miss.
+-- The FLIP only ever travels page -> Lua as this callback, so watching it through is the one place
+-- this side can learn the lens. The app always enters on the rear one, and both ways to flip end here.
 rpc.watch('sd-phone:camera:open',  function() cameraRearLens = true  end)
 rpc.watch('sd-phone:camera:close', function() cameraRearLens = false end)
 rpc.watch('sd-phone:camera:selfie', function(payload)
@@ -838,8 +816,7 @@ mirror.bind({
 
 -------------------------------------------------------------------- background
 
--- Cosmetic battery drain: one percent every 30s while the tablet is open, pushed to the React app.
--- The tablet's own charge, which is why the phone's battery push is dropped at the mirror.
+-- Cosmetic drain, 1% per 30s while open; the tablet's OWN charge, so the phone's push is dropped.
 CreateThread(function()
     while true do
         Wait(30000)
@@ -850,9 +827,20 @@ CreateThread(function()
     end
 end)
 
----@type table<integer, { obj: integer, color: string }> Server id -> local tablet-prop copy welded
----onto that remote holder's ped, with the colour it was welded in.
+---@type table<integer, { obj: integer, color: string }> Server id -> welded local copy + its colour.
 local remoteProps = {}
+
+---@type table<integer, integer> Server id -> game time of the last rebuild accepted for that holder.
+local remoteLastBuild = {}
+
+---@type table<integer, true> Holders mid-spawn; createProp yields, so two changes would orphan one.
+local remoteBuilding = {}
+
+---@type integer Minimum ms between rebuilds for one holder. A rebuild is a delete plus a spawn on
+---EVERY observer, so the receiving side bounds it rather than trusting the sender's rate - the
+---case this exists for is a client alternating two valid colours, which never repeats a value and
+---so slips straight past the "already welded in this colour" check below.
+local REMOTE_REBUILD_MIN <const> = 500
 
 ---Deletes a remote holder's welded prop copy, if any. Idempotent.
 ---@param source integer server id of the remote holder
@@ -862,11 +850,10 @@ local function removeRemoteProp(source)
     remoteProps[source] = nil
 end
 
--- Cross-player prop visibility: the holder broadcasts the replicated `sdTablet` player statebag
--- and every client welds its own local prop copy onto the holder's ped.
+-- Cross-player visibility: the server ownership-checks the colour and writes the replicated
+-- `sdTablet` bag, and every client welds its own local copy onto the holder's ped off it.
 if cfg.PropVisibleToOthers then
-    ---Resolves a `player:<serverId>` bag to (serverId, ped); ped is 0 when that player isn't in
-    ---scope on this client.
+    ---Resolves a `player:<serverId>` bag to (serverId, ped); ped is 0 when out of scope here.
     ---@param bagName string
     ---@return integer? source, integer ped
     local function bagOwner(bagName)
@@ -879,42 +866,61 @@ if cfg.PropVisibleToOthers then
 
     AddStateBagChangeHandler('sdTablet', nil, function(bagName, _key, value)
         local source, ped = bagOwner(bagName)
-        if not source or source == GetPlayerServerId(PlayerId()) then return end
+        if not source or source == cache.serverId then return end
+        -- Stowing is never throttled: it only deletes, and refusing it would strand a prop.
         if not value or ped == 0 then
             removeRemoteProp(source)
             return
         end
         -- The bag carries the holder's colour, so an unknown one is dropped rather than welded.
         if not TABLET_COLORS[value] then return end
+
         local entry = remoteProps[source]
         if entry and entry.color == value and DoesEntityExist(entry.obj) then return end
+
+        -- Everything past here spawns an entity, so it is rate-limited and single-flighted.
+        if remoteBuilding[source] then return end
+        local now = GetGameTimer()
+        local last = remoteLastBuild[source]
+        if last and now - last < REMOTE_REBUILD_MIN then return end
+        remoteLastBuild[source] = now
+
+        remoteBuilding[source] = true
         removeRemoteProp(source)
         local obj = createProp(ped, value)
+        remoteBuilding[source] = nil
         if obj then remoteProps[source] = { obj = obj, color = value } end
     end)
 
-    -- 1s sweep: removes copies whose owner left scope or whose prop no longer exists.
+    -- 1s sweep for copies whose owner left scope, idling at 2s while nothing is welded.
     CreateThread(function()
         while true do
-            Wait(1000)
-            for source, entry in pairs(remoteProps) do
-                local plyr = GetPlayerFromServerId(source)
-                local ped = plyr ~= -1 and GetPlayerPed(plyr) or 0
-                if ped == 0 or not DoesEntityExist(ped) or not DoesEntityExist(entry.obj) then
-                    removeRemoteProp(source)
+            if not next(remoteProps) and not next(remoteLastBuild) then
+                Wait(2000)
+            else
+                Wait(1000)
+                for source, entry in pairs(remoteProps) do
+                    local plyr = GetPlayerFromServerId(source)
+                    local ped = plyr ~= -1 and GetPlayerPed(plyr) or 0
+                    if ped == 0 or not DoesEntityExist(ped) or not DoesEntityExist(entry.obj) then
+                        removeRemoteProp(source)
+                    end
+                end
+                -- Stamps outlive their prop by design - clearing one on stow would let a client
+                -- alternating hold/stow past the throttle - so they retire when the player leaves.
+                for source in pairs(remoteLastBuild) do
+                    if not remoteProps[source] and GetPlayerFromServerId(source) == -1 then
+                        remoteLastBuild[source] = nil
+                    end
                 end
             end
         end
     end)
 end
 
----Re-stamps the session anchor and tells the NUI the character resolved, mirroring sd-phone's own
----handling: settings only resolve once the citizenid exists, so the UI re-pulls its per-player
----state the moment the framework reports the player in. Both devices stamp from the same events,
----which is why the Health app's "time awake" agrees across them.
----Pushed even while the tablet is closed, for the same reason sd-phone pushes it while the phone
----is: the NUI is loaded from resource start and keeps running hidden, so a skipped signal leaves
----it to reopen on the previous character's settings.
+---Re-stamps the session anchor and tells the NUI the character resolved: settings only resolve
+---once the citizenid exists. Pushed even while closed, because the hidden NUI would otherwise
+---reopen on the previous character's settings.
 local function pushCharacterLoaded()
     SESSION_START_MS = GetCloudTimeAsInt() * 1000
     SendNUIMessage({ action = 'sd-phone:client:characterLoaded' })
@@ -923,13 +929,10 @@ end
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', pushCharacterLoaded)
 RegisterNetEvent('esx:playerLoaded', pushCharacterLoaded)
 
----sd-phone's server fires this when settings appear after the UI has already hydrated (its
----lb-phone import writes phone_settings partway through boot). The tablet's copy of that UI needs
----the same nudge; net events reach every resource that registered them.
+---sd-phone fires this when settings appear after the UI has hydrated; our copy needs the nudge too.
 RegisterNetEvent('sd-phone:client:rehydrate', pushCharacterLoaded)
 
----Resource restart with the character already in: the framework load events above won't re-fire,
----but the freshly reloaded NUI still needs the character signal.
+---Restart with the character already in: the load events won't re-fire, but the NUI still needs it.
 AddEventHandler('onClientResourceStart', function(resource)
     if resource ~= GetCurrentResourceName() then return end
     SetTimeout(5000, pushCharacterLoaded)
@@ -945,17 +948,17 @@ exports('isOpen', function() return tabletState.open end)
 ---@return boolean
 exports('isLocked', function() return tabletState.locked end)
 
----exports['sd-tablet']:open() - no ownership check; the caller is another script that has already
----decided this player may have a tablet on screen.
+---exports['sd-tablet']:open() - no ownership check; the caller has already decided.
+---CALL THIS FROM A THREAD: it yields on a server round-trip, so a call from a resource's top level
+---or a native callback raises rather than returns. CreateThread around it is always safe.
 ---@return boolean opened
 exports('open', OpenTablet)
 
 ---exports['sd-tablet']:close()
 exports('close', function() CloseTablet() end)
 
----Launches an app on the tablet - exports['sd-tablet']:openApp(appId, link). The tablet's own
----counterpart to exports['sd-phone']:openApp, which targets the phone (and opens it, which closes
----this device). Returns false on a refused open or malformed arguments.
+---Launches an app - exports['sd-tablet']:openApp(appId, link); the counterpart to sd-phone's, which
+---targets the phone. Yields when the tablet is closed, so call it from a thread.
 ---@param appId string app id as the home screen knows it (e.g. 'messages')
 ---@param link table|nil optional deep-link payload
 ---@return boolean accepted
@@ -972,8 +975,7 @@ end)
 
 -------------------------------------------------------------------- cleanup
 
----Resource-stop cleanup: releases NUI focus, deletes props, clears the statebag, stops the clip,
----and stands the seam down so a restarting tablet doesn't leave sd-phone mirroring into nothing.
+---Resource-stop cleanup: releases focus, stops the clip, deletes props and stands the seam down.
 ---@param resource string name of the resource that stopped
 AddEventHandler('onResourceStop', function(resource)
     if resource ~= GetCurrentResourceName() then return end
@@ -984,6 +986,7 @@ AddEventHandler('onResourceStop', function(resource)
         TriggerEvent('sd-phone:client:openState', false)
     end
     stopPose()
-    if cfg.PropVisibleToOthers then LocalPlayer.state:set('sdTablet', false, true) end
+    -- The `sdTablet` bag is the server's to write, and it clears every player's on its own stop.
+    -- Writing false here too would desync it and get the next open deduped away as "no change".
     for source in pairs(remoteProps) do removeRemoteProp(source) end
 end)
