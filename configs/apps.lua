@@ -45,6 +45,12 @@ return {
         { id = 'mdt', label = 'MDT', icon = 'mdt', route = '/mdt', accent = '#1D4ED8', base = true, enabled = true },
         { id = 'emsmdt', label = 'EMS', icon = 'emsmdt', route = '/emsmdt', accent = '#E11D48', base = true, enabled = true },
         { id = 'dojmdt', label = 'DOJ', icon = 'dojmdt', route = '/dojmdt', accent = '#6D28D9', base = true, enabled = true },
+
+        -- Racing is tablet-only on the same terms: sd-phone's catalog carries
+        -- `racing` with `enabled = false`, so no phone shows it. The app itself is sd-phone's,
+        -- gated by `Enabled` in its configs/racing.lua; with that off this icon stays hidden.
+        { id = 'racing', label = 'Racing', icon = 'racing', route = '/racing', accent = '#0BF2B4', base = true, enabled = true },
+
         { id = 'messages', label = 'Messages', icon = 'messages', route = '/messages', accent = '#34c759', base = true, enabled = true },
         { id = 'mail', label = 'Mail', icon = 'mail', route = '/mail', accent = '#0a84ff', base = true, enabled = true },
         { id = 'maps', label = 'Maps', icon = 'maps', route = '/maps', accent = '#f0c43a', base = true, enabled = true },

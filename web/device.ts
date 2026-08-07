@@ -17,13 +17,18 @@ export const device: DeviceProfile = {
     excludedApps: ['phone'],
     // A landscape slab is too wide to sit in a corner without crowding the edge of the screen.
     defaultAlign: 'middle-center',
+    // Where the size slider sits before the player touches it. A tablet is a thing you hold up to
+    // read, so it wants to fill the screen the way the phone deliberately does not: 90 renders the
+    // frame at 0.94, roughly 1028px of a 1080p screen once the edge padding is counted. The phone's
+    // 50 on a 1042-tall frame reads as a postage stamp.
+    defaultScale: 90,
     screen: {
         // Landscape: wider than it is tall. PhoneShell skips its camera rotate-to-landscape
         // transform when w > h, since this device is already there. 1366x1024 is the 12.9" iPad
         // Pro in landscape. With the bezel that is a 1042-tall frame, so at the maximum phoneScale
         // of 100 (scale 1.0) it wants 1090px of a 1080p screen and loses 10px top and bottom. The
-        // default scale is 50, which renders it at 0.7, so this only bites a player who has
-        // deliberately pushed the slider to full on a 1080p monitor.
+        // default scale is 90 (see defaultScale above), which renders it at 0.94 and clears 1080p
+        // with room to spare, so this only bites a player who pushes the slider the last 10%.
         w:      1366,
         h:      1024,
         // Thin, like a current iPad: the same absolute rail the phone uses, which is what sells
