@@ -23,7 +23,12 @@ export default defineConfig({
     // The locale catalogs are globbed relative to sd-phone's own i18n source file, so they
     // resolve to sd-phone/locales and rollup bundles them without help. The dev server serves
     // files, not bundles, so it needs both resource roots on its allowlist.
-    server: { fs: { allow: ['..', phoneRoot] } },
+    // That allowlist serves all of sd-tablet AND sd-phone over HTTP, so the bind is pinned to
+    // loopback rather than left to the default. Never run this dev server with --host.
+    server: {
+        host: '127.0.0.1',
+        fs: { allow: ['..', phoneRoot] },
+    },
     build: {
         // FiveM's CEF and the dev browser (Edge) are both modern Chromium, so
         // skip downleveling to the generic es2020 baseline.
