@@ -43,10 +43,14 @@ end
 -- What this PLAYER may see also depends on their job, which only sd-phone's server knows; asked on
 -- every open so a multijob switch needs no event. Called directly rather than through the seam,
 -- because it decides what goes INTO the open payload - an older sd-phone leaves the catalog alone.
+--
+-- `false`, not a number: ox_lib's second argument is a call-suppression window, not a timeout, so
+-- a number would make a second open inside it answer nil and take the older-sd-phone branch - which
+-- fails OPEN, handing a civilian every terminal icon. sd-phone's own visibleApps passes false too.
 ---@return table[] apps
 ---@return string[] dock
 local function visibleApps()
-    local ok, hidden = pcall(lib.callback.await, 'sd-phone:server:apps:hidden', 5000)
+    local ok, hidden = pcall(lib.callback.await, 'sd-phone:server:apps:hidden', false)
     if not ok or type(hidden) ~= 'table' or #hidden == 0 then return ENABLED_APPS, ENABLED_DOCK end
 
     local drop = {}
@@ -745,10 +749,15 @@ end)
 local function ToggleTablet()
     if tabletState.open then CloseTablet() return end
 
-    -- The last-used colour is a hint the server only honours while that item is still owned. The
-    -- await is bounded because an unbounded one never returns if our server is mid-restart, and a
-    -- timeout resolves to nil - which the type check below already reports as a refusal.
-    local res = lib.callback.await('sd-tablet:server:resolveOpen', 10000, currentColor)
+    -- The last-used colour is a hint the server only honours while that item is still owned.
+    --
+    -- The second argument stays `false`. It reads like a timeout and is NOT one: ox_lib documents
+    -- it as "prevent the event from being called for the given time", so a number makes a repeat
+    -- call inside that window return nil with no round-trip at all - which the check below would
+    -- report as "you don't have a tablet" for a player who simply reopened too soon. Every await
+    -- is already bounded by ox_lib's own `ox:callbackTimeout`, and that path raises rather than
+    -- answering nil, so there is nothing here for a number to buy.
+    local res = lib.callback.await('sd-tablet:server:resolveOpen', false, currentColor)
     if type(res) ~= 'table' or res.ok ~= true then
         notify((type(res) == 'table' and res.message) or locale('no_tablet'), 'error')
         return
