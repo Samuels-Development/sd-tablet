@@ -39,11 +39,22 @@ local function startSweeper()
         while next(pending) do
             Wait(1000)
             local now = GetGameTimer()
+
+            -- Collected first, answered after. `entry.cb` is the NUI callback's own sink, which is
+            -- free to call bridge.invoke again - and adding a key to a table mid-`pairs` is
+            -- undefined in Lua 5.4, up to and including a hard "invalid key to 'next'". Clearing
+            -- one is explicitly allowed, so only the answers move out of the loop.
+            local due
             for token, entry in pairs(pending) do
                 if now >= entry.expires then
                     pending[token] = nil
-                    entry.cb({ success = false, message = 'No response' })
+                    due = due or {}
+                    due[#due + 1] = entry.cb
                 end
+            end
+
+            if due then
+                for i = 1, #due do due[i]({ success = false, message = 'No response' }) end
             end
         end
         sweeping = false
