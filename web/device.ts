@@ -71,5 +71,9 @@ export const device: DeviceProfile = {
             rowStride: 152,
             stripTop:  70,
         },
+        densities: {
+            compact: { cols: 10, rows: 6, padX: 50,  icon: 78 },
+            large:   { cols: 6,  rows: 4, padX: 100, icon: 130 },
+        },
     },
 };
