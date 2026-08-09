@@ -4,7 +4,7 @@
     "version": "0.1.0",
     "type": "module",
     "scripts": {
-        "sync:sdk": "node -e \"require('fs').copyFileSync('../../sd-phone/web/public/components.js','public/components.js')\"",
+        "sync:sdk": "node -e \"const fs=require('fs');fs.mkdirSync('public',{recursive:true});fs.copyFileSync('../../sd-phone/web/public/components.js','public/components.js')\"",
         "dev": "npm run sync:sdk && vite",
         "build": "npm run sync:sdk && tsc --noEmit && vite build",
         "build:demo": "npm run sync:sdk && tsc --noEmit && vite build --mode demo",
