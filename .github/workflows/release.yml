@@ -1,0 +1,100 @@
+name: Release
+
+# Fires when a GitHub Release is published (Releases > Draft a new release > Publish).
+# Builds the NUI fresh and attaches a lean, drop-in resource zip to that release.
+on:
+  release:
+    types: [published]
+  # Re-package an already published release without unpublishing it, for when the
+  # packaging itself was wrong rather than the code.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to package (e.g. v0.9.7)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: build + package
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      # This resource has NO UI source of its own. web/vite.config.ts aliases '@' at
+      # ../../sd-phone/web/src and pulls the locale catalogs out of sd-phone/locales, so
+      # the two repos have to sit side by side exactly as they do in a live resources
+      # folder. sd-phone is checked out at the SAME tag: a tablet release is only ever
+      # the phone's UI in a different chassis, so a mismatched pair is not a thing to ship.
+      - name: Check out sd-tablet
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          path: sd-tablet
+
+      - name: Check out sd-phone at the same tag
+        uses: actions/checkout@v7
+        with:
+          repository: Samuels-Development/sd-phone
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          path: sd-phone
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sd-tablet/web/package-lock.json
+
+      # `npm run build` runs sync:sdk first, which copies sd-phone's components.js in for
+      # the custom-app SDK. That is why the phone checkout has to land before this step.
+      - name: Build NUI
+        working-directory: sd-tablet/web
+        run: |
+          npm ci
+          npm run build
+
+      # Explicit allowlist of runtime files -> dist/sd-tablet/ so the zip extracts to a
+      # correctly named resource folder. web/src does not exist here; node_modules and the
+      # dev config are intentionally left out.
+      - name: Stage resource
+        working-directory: sd-tablet
+        run: |
+          mkdir -p ../dist/sd-tablet/web
+          cp fxmanifest.lua README.md ../dist/sd-tablet/
+          cp -r client server configs locales images ../dist/sd-tablet/
+          cp -r web/build ../dist/sd-tablet/web/build
+
+      # The staging list above is an allowlist, so a new top-level directory would be
+      # dropped from the zip in silence - which is how sd-phone v0.9.6 shipped without
+      # shared/ and failed on start. Fail the build instead.
+      - name: Verify staged resource
+        working-directory: sd-tablet
+        run: |
+          missing=0
+          paths=$(grep -oE "'[^']+\.(lua|json|html|js|css|png|jpg|webp|svg|woff2?|mp3)'" fxmanifest.lua \
+            | tr -d "'" | grep -v '^@' | sed 's|/\*\*.*||; s|/\*.*||' | sort -u)
+          for p in $paths; do
+            if [ ! -e "../dist/sd-tablet/$p" ]; then
+              echo "::error::fxmanifest.lua declares '$p' but it is not in the staged resource"
+              missing=1
+            fi
+          done
+          if [ "$missing" != 0 ]; then
+            echo "Staged resource is incomplete - add the missing path to the Stage resource step."
+            exit 1
+          fi
+          echo "All fxmanifest paths present:"
+          echo "$paths"
+
+      - name: Zip
+        run: |
+          cd dist
+          zip -qr "../sd-tablet-${TAG}.zip" sd-tablet
+
+      - name: Attach to release
+        working-directory: sd-tablet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${TAG}" "../sd-tablet-${TAG}.zip" --clobber
