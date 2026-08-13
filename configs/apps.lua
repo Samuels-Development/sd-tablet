@@ -52,7 +52,7 @@ return {
         -- `enabled = true`, and the same panes reflow to a phone. No job gate stands in front of
         -- it, so every player sees it. The app itself is sd-phone's, gated by `Enabled` in its
         -- configs/racing.lua; with that off this icon stays hidden.
-        { id = 'racing', label = 'Racing', icon = 'racing', route = '/racing', accent = '#0BF2B4', base = true, enabled = true },
+        { id = 'racing', label = 'Racing', icon = 'racing', route = '/racing', accent = '#0A8C72', base = true, enabled = true },
 
         { id = 'messages', label = 'Messages', icon = 'messages', route = '/messages', accent = '#34c759', base = true, enabled = true },
         { id = 'mail', label = 'Mail', icon = 'mail', route = '/mail', accent = '#0a84ff', base = true, enabled = true },
