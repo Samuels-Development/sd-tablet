@@ -45,7 +45,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: sd-tablet/web/package-lock.json
+          cache-dependency-path: |
+            sd-tablet/web/package-lock.json
+            sd-phone/web/package-lock.json
+
+      # sd-phone's own dependencies, needed even though nothing here runs its build. The tablet
+      # compiles sources that LIVE under sd-phone/web/src, and Node resolves a bare import from the
+      # importing file's directory upwards - so `import 'react'` inside sd-phone/web/src looks in
+      # sd-phone/web/node_modules and never sees sd-tablet/web/node_modules. Locally this is
+      # invisible because anyone building the tablet already has the phone installed; on a clean
+      # runner tsc fails with "Cannot find module 'react'".
+      - name: Install sd-phone dependencies
+        working-directory: sd-phone/web
+        run: npm ci
 
       # `npm run build` runs sync:sdk first, which copies sd-phone's components.js in for
       # the custom-app SDK. That is why the phone checkout has to land before this step.
