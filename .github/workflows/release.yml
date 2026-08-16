@@ -88,13 +88,15 @@ jobs:
           echo "All fxmanifest paths present:"
           echo "$paths"
 
+      # Named without the tag so the download URL and the extracted folder read the same on
+      # every release, matching sd-phone. The release itself carries the version.
       - name: Zip
         run: |
           cd dist
-          zip -qr "../sd-tablet-${TAG}.zip" sd-tablet
+          zip -qr ../sd-tablet.zip sd-tablet
 
       - name: Attach to release
         working-directory: sd-tablet
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${TAG}" "../sd-tablet-${TAG}.zip" --clobber
+        run: gh release upload "${TAG}" ../sd-tablet.zip --clobber
