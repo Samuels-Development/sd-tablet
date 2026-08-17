@@ -31,7 +31,7 @@ files {
     -- server the `ox:locale` convar.
     'locales/*.json',
     'web/build/index.html',
-    'web/build/components.js',
+    'web/build/sdphone-sdk.js',
     'web/build/assets/*.js',
     'web/build/assets/*.css',
     'web/build/assets/*.png',

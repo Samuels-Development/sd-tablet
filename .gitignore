@@ -5,6 +5,6 @@ web/node_modules/
 web/build/
 
 # Copied from sd-phone by `bun run sync:sdk`. Committing it forks the SDK and lets it drift.
-web/public/components.js
+web/public/sdphone-sdk.js
 
 .playwright-mcp/
