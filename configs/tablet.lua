@@ -53,6 +53,13 @@ return {
     -- only - getting into a car with the tablet already out does not close it.
     BlockWhileDriving  = true,
 
+    -- The boot animation: your logo over a lit backdrop, played once when the resource starts and
+    -- the player first opens the tablet, never on ordinary opens after that. Off by default so an
+    -- untouched install goes straight to the lockscreen; set true to turn it on. Players who pick
+    -- No Motion in Accessibility never see it either way. The tablet keeps its OWN value rather
+    -- than reading sd-phone's configs/phone.lua BootScreen, for the reason at the top of this file.
+    BootScreen = false,
+
     -- Let the player walk around while the tablet is open, exactly as sd-phone's AllowMovement
     -- does: mouse-look, aiming, firing, melee and weapon switching are suppressed so the mouse
     -- only drives the on-screen cursor, and focusing a text field hands full control back to the

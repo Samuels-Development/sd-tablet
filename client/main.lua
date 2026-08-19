@@ -550,6 +550,7 @@ local function openPayload()
         dock                = dock,
         apps                = apps,
         mailDomain          = cfg.Mail.Domain,
+        bootScreen          = cfg.BootScreen ~= false,
         number              = NUMBER_FORMAT,
         wallpaper           = {
             lock = config.Apps.Wallpaper,
