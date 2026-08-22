@@ -32,6 +32,7 @@ files {
     'locales/*.json',
     'web/build/index.html',
     'web/build/sdphone-sdk.js',
+    'web/build/sdphone-sdk.d.ts',
     'web/build/assets/*.js',
     'web/build/assets/*.css',
     'web/build/assets/*.png',
@@ -41,6 +42,7 @@ files {
     'web/build/assets/*.woff2',
     'web/build/assets/*.woff',
     'web/build/assets/*.mp3',
+    'web/build/assets/*.ogg',
 }
 
 -- sd-phone is a hard dependency, not a soft one: every NUI action this device answers is one of
