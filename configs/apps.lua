@@ -93,6 +93,7 @@ return {
         { id = 'wordle', label = 'Wordle', icon = 'wordle', route = '/wordle', accent = '#6AAA64', base = false, enabled = true },
         { id = 'flappy', label = 'Flappy', icon = 'flappy', route = '/flappy', accent = '#4EC0CA', base = false, enabled = true },
         { id = 'blocks', label = 'Blocks', icon = 'blocks', route = '/blocks', accent = '#7C4DFF', base = false, enabled = true },
+        { id = 'minesweeper', label = 'Minesweeper', icon = 'minesweeper', route = '/minesweeper', accent = '#E4483D', base = false, enabled = true },
         { id = 'blackjack', label = 'Blackjack', icon = 'blackjack', route = '/blackjack', accent = '#157347', base = false, enabled = true },
         { id = 'climber', label = 'Climber', icon = 'climber', route = '/climber', accent = '#8BC34A', base = false, enabled = true },
         { id = 'railrunner', label = 'Rail Runner', icon = 'railrunner', route = '/railrunner', accent = '#3C5290', base = false, enabled = false },
