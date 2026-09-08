@@ -624,10 +624,10 @@ local function canOpen()
     return true
 end
 
----Opens the tablet NUI, arms the mirror, and takes the screen from the phone if it had it.
----Refuses while dead, swimming, driving, or disabled.
+---Commits an already-authorised open: arms the mirror, takes focus, and opens the NUI.
+---Only RequestOpen and the origin-checked usable-item event may call this function.
 ---@return boolean opened
-local function OpenTablet()
+local function OpenAuthorisedTablet()
     local ok, message = canOpen()
     if not ok then
         if message then notify(message, 'error') end
@@ -681,6 +681,27 @@ local function OpenTablet()
 
     debugPrint('tablet opened')
     return true
+end
+
+---Asks the server to authorise an open, including the configured item requirement.
+---Every client-callable entry point uses this path; client-side checks are not a trust boundary.
+---@return boolean opened
+local function RequestOpen()
+    local ok, message = canOpen()
+    if not ok then
+        if message then notify(message, 'error') end
+        return false
+    end
+
+    -- The last-used colour is only a hint; the server accepts it when that item is still owned.
+    -- `false` disables ox_lib's call-suppression window (it is not a timeout).
+    local res = lib.callback.await('sd-tablet:server:resolveOpen', false, currentColor)
+    if type(res) ~= 'table' or res.ok ~= true then
+        notify((type(res) == 'table' and res.message) or locale('no_tablet'), 'error')
+        return false
+    end
+    if res.color and TABLET_COLORS[res.color] then currentColor = res.color end
+    return OpenAuthorisedTablet()
 end
 
 ---Closes the tablet NUI, disarms the mirror, releases focus and drops the pose. Idempotent.
@@ -745,26 +766,10 @@ end)
 
 -------------------------------------------------------------------- entry points
 
----Keybind toggle; ownership is server-authoritative because the item check is the only thing
----standing between a keybind and a free tablet.
+---Keybind toggle; all opening entry points share the same server-authorised path.
 local function ToggleTablet()
     if tabletState.open then CloseTablet() return end
-
-    -- The last-used colour is a hint the server only honours while that item is still owned.
-    --
-    -- The second argument stays `false`. It reads like a timeout and is NOT one: ox_lib documents
-    -- it as "prevent the event from being called for the given time", so a number makes a repeat
-    -- call inside that window return nil with no round-trip at all - which the check below would
-    -- report as "you don't have a tablet" for a player who simply reopened too soon. Every await
-    -- is already bounded by ox_lib's own `ox:callbackTimeout`, and that path raises rather than
-    -- answering nil, so there is nothing here for a number to buy.
-    local res = lib.callback.await('sd-tablet:server:resolveOpen', false, currentColor)
-    if type(res) ~= 'table' or res.ok ~= true then
-        notify((type(res) == 'table' and res.message) or locale('no_tablet'), 'error')
-        return
-    end
-    if res.color and TABLET_COLORS[res.color] then currentColor = res.color end
-    OpenTablet()
+    RequestOpen()
 end
 
 lib.addKeybind({
@@ -783,12 +788,13 @@ lib.addKeybind({
     onReleased  = exitLookMode,
 })
 
----Opens after an item is used, in its colour; ownership is proven by the use callback firing at
----all, and the colour is whitelist-checked because it arrives over the network.
+---Opens after an item is used. Only the server may enter this already-authorised path: without
+---the origin check a modified client can TriggerEvent locally and bypass RequireItem.
 ---@param color string|nil colour of the item that was used
 RegisterNetEvent('sd-tablet:client:openFromItem', function(color)
+    if source ~= 65535 then return end
     if color and TABLET_COLORS[color] then currentColor = color end
-    OpenTablet()
+    OpenAuthorisedTablet()
 end)
 
 -------------------------------------------------------------------- device-local NUI handlers
@@ -812,7 +818,7 @@ local LOCAL_HANDLERS = {
 
     ---React to Lua: the closed-shell peek was tapped; put the device back on screen.
     ['sd-phone:requestOpen'] = function(_, cb)
-        OpenTablet()
+        RequestOpen()
         cb({ ok = true })
     end,
 
@@ -998,11 +1004,11 @@ exports('isOpen', function() return tabletState.open end)
 ---@return boolean
 exports('isLocked', function() return tabletState.locked end)
 
----exports['sd-tablet']:open() - no ownership check; the caller has already decided.
+---exports['sd-tablet']:open() - server-authorised, including RequireItem when enabled.
 ---CALL THIS FROM A THREAD: it yields on a server round-trip, so a call from a resource's top level
 ---or a native callback raises rather than returns. CreateThread around it is always safe.
 ---@return boolean opened
-exports('open', OpenTablet)
+exports('open', RequestOpen)
 
 ---exports['sd-tablet']:close()
 exports('close', function() CloseTablet() end)
@@ -1016,7 +1022,7 @@ exports('openApp', function(appId, link)
     if type(appId) ~= 'string' or appId == '' then return false end
     if link ~= nil and type(link) ~= 'table' then return false end
     if not tabletState.open then
-        OpenTablet()
+        RequestOpen()
         if not tabletState.open then return false end
     end
     SendNUIMessage({ action = 'sd-phone:launchApp', data = { id = appId, link = link } })
