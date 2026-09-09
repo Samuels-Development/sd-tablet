@@ -655,6 +655,9 @@ local function OpenTablet()
     mirror.arm(true)
     mirror.setCompanionOpen(true)
 
+    -- Integration so that the tablet works when “single SIM” mode is enabled and all information is stored on the SIM card
+    if simModeActive() then TriggerServerEvent('sd-phone:server:sim:requestPush') end
+    
     updatePose()
 
     SetNuiFocus(true, true)
