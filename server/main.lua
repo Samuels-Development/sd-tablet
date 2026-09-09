@@ -289,15 +289,16 @@ end)
 -- ---------------------------------------------------------------------------
 -- Hold broadcast
 --
--- Nearby clients weld a local prop copy off the replicated `sdTablet` player bag. The bag is
--- written HERE because a client can write its own, so a client-written colour would be the item
--- check with the item removed - and every change costs each observer a prop delete + spawn.
+-- Nearby clients weld a local prop copy from a server-owned GlobalState map. Player state bags are
+-- deliberately not used: their owner may replicate arbitrary values unless the whole server opts
+-- into sv_stateBagStrictMode, which would let a modified client bypass the item check and make
+-- every observer delete + spawn props.
 -- Writes are coalesced rather than dropped: a stow arriving inside the window still has to land,
 -- or the prop is stranded in every observer's view until the player next opens the tablet.
 -- ---------------------------------------------------------------------------
 
 if cfg.PropVisibleToOthers then
-    ---@type integer Minimum ms between bag writes for one player; a real hold never bursts.
+    ---@type integer Minimum ms between broadcasts for one player; a real hold never bursts.
     local HOLD_MIN_INTERVAL <const> = 400
 
     ---@type table<string, true> Colours any configured item can open, for the no-item-check case.
@@ -315,14 +316,21 @@ if cfg.PropVisibleToOthers then
     ---@type table<number, HoldState>
     local holdState = {}
 
-    ---Writes the bag and stamps the window.
+    ---@type table<string, string> Server id -> authorised tablet colour. GlobalState is
+    ---server-written/client-read, unlike a player's own state bag.
+    local publishedHolds = {}
+    GlobalState.sdTabletHolds = publishedHolds
+
+    ---Publishes the hold and stamps the window.
     ---@param src number
     ---@param state HoldState
     ---@param value string|false
     local function applyHold(src, state, value)
         state.at    = GetGameTimer()
         state.value = value
-        Player(src).state:set('sdTablet', value, true)
+        publishedHolds[tostring(src)] = value or nil
+        -- State bags are shallow, so reassigning publishes the mutated map.
+        GlobalState.sdTabletHolds = publishedHolds
     end
 
     ---Resolves what this player may claim to be holding.
@@ -382,16 +390,18 @@ if cfg.PropVisibleToOthers then
     end)
 
     AddEventHandler('playerDropped', function()
-        holdState[source] = nil
+        local src = source
+        holdState[src] = nil
+        if publishedHolds[tostring(src)] then
+            publishedHolds[tostring(src)] = nil
+            GlobalState.sdTabletHolds = publishedHolds
+        end
     end)
 
-    -- Restarting leaves every holder's bag set with no observer left to clean it up.
+    -- Clear the server-owned snapshot so every observer removes its local copies on restart.
     AddEventHandler('onResourceStop', function(resource)
         if resource ~= GetCurrentResourceName() then return end
-        for _, id in ipairs(GetPlayers()) do
-            local src = tonumber(id)
-            if src then Player(src).state:set('sdTablet', false, true) end
-        end
+        GlobalState.sdTabletHolds = {}
     end)
 end
 

@@ -895,6 +895,9 @@ local remoteLastBuild = {}
 ---@type table<integer, true> Holders mid-spawn; createProp yields, so two changes would orphan one.
 local remoteBuilding = {}
 
+---@type table<integer, string> Server-authorised holds replicated through GlobalState.
+local remoteHolds = {}
+
 ---@type integer Minimum ms between rebuilds for one holder. A rebuild is a delete plus a spawn on
 ---EVERY observer, so the receiving side bounds it rather than trusting the sender's rate - the
 ---case this exists for is a client alternating two valid colours, which never repeats a value and
@@ -909,33 +912,30 @@ local function removeRemoteProp(source)
     remoteProps[source] = nil
 end
 
--- Cross-player visibility: the server ownership-checks the colour and writes the replicated
--- `sdTablet` bag, and every client welds its own local copy onto the holder's ped off it.
+-- Cross-player visibility: the server ownership-checks the colour and publishes a server-only
+-- GlobalState map. Player bags are intentionally avoided because their owner can write them.
 if cfg.PropVisibleToOthers then
-    ---Resolves a `player:<serverId>` bag to (serverId, ped); ped is 0 when out of scope here.
-    ---@param bagName string
-    ---@return integer? source, integer ped
-    local function bagOwner(bagName)
-        local source = tonumber(bagName:match('player:(%d+)'))
-        if not source then return nil, 0 end
+    ---Returns a holder's ped, or 0 while they are outside this client's scope.
+    ---@param source integer server id
+    ---@return integer ped
+    local function remotePed(source)
         local plyr = GetPlayerFromServerId(source)
-        if plyr == -1 then return source, 0 end
-        return source, GetPlayerPed(plyr)
+        if plyr == -1 then return 0 end
+        return GetPlayerPed(plyr)
     end
 
-    AddStateBagChangeHandler('sdTablet', nil, function(bagName, _key, value)
-        local source, ped = bagOwner(bagName)
-        if not source or source == cache.serverId then return end
-        -- Stowing is never throttled: it only deletes, and refusing it would strand a prop.
-        if not value or ped == 0 then
+    ---Makes one authorised remote hold match what is visible locally.
+    ---@param source integer server id
+    local function syncRemoteProp(source)
+        local color = remoteHolds[source]
+        local ped = remotePed(source)
+        if not color or ped == 0 then
             removeRemoteProp(source)
             return
         end
-        -- The bag carries the holder's colour, so an unknown one is dropped rather than welded.
-        if not TABLET_COLORS[value] then return end
 
         local entry = remoteProps[source]
-        if entry and entry.color == value and DoesEntityExist(entry.obj) then return end
+        if entry and entry.color == color and DoesEntityExist(entry.obj) then return end
 
         -- Everything past here spawns an entity, so it is rate-limited and single-flighted.
         if remoteBuilding[source] then return end
@@ -946,29 +946,63 @@ if cfg.PropVisibleToOthers then
 
         remoteBuilding[source] = true
         removeRemoteProp(source)
-        local obj = createProp(ped, value)
+        local obj = createProp(ped, color)
         remoteBuilding[source] = nil
-        if obj then remoteProps[source] = { obj = obj, color = value } end
+        if not obj then return end
+
+        -- Model streaming yields. The player may have stowed, changed colour, or left scope while
+        -- it loaded; never install the stale result and let the sweep retry the current state.
+        if remoteHolds[source] ~= color or remotePed(source) ~= ped then
+            DeleteObject(obj)
+            return
+        end
+        remoteProps[source] = { obj = obj, color = color }
+    end
+
+    ---Accepts only the shape the server publishes and reconciles local copies against it.
+    ---@param value any GlobalState.sdTabletHolds
+    local function syncRemoteHolds(value)
+        local nextHolds = {}
+        if type(value) == 'table' then
+            for id, color in pairs(value) do
+                local source = tonumber(id)
+                if source and source ~= cache.serverId and TABLET_COLORS[color] then
+                    nextHolds[source] = color
+                end
+            end
+        end
+
+        for source in pairs(remoteHolds) do
+            if not nextHolds[source] then removeRemoteProp(source) end
+        end
+        remoteHolds = nextHolds
+        for source in pairs(remoteHolds) do syncRemoteProp(source) end
+    end
+
+    AddStateBagChangeHandler('sdTabletHolds', 'global', function(_bagName, _key, value)
+        syncRemoteHolds(value)
     end)
 
-    -- 1s sweep for copies whose owner left scope, idling at 2s while nothing is welded.
+    -- A handler only sees future writes; hydrate holders that predate this client resource.
+    syncRemoteHolds(GlobalState.sdTabletHolds)
+
+    -- Reconcile scope changes every second; GlobalState itself is intentionally not scope-bound.
     CreateThread(function()
         while true do
-            if not next(remoteProps) and not next(remoteLastBuild) then
+            if not next(remoteHolds) and not next(remoteProps) and not next(remoteLastBuild) then
                 Wait(2000)
             else
                 Wait(1000)
                 for source, entry in pairs(remoteProps) do
-                    local plyr = GetPlayerFromServerId(source)
-                    local ped = plyr ~= -1 and GetPlayerPed(plyr) or 0
-                    if ped == 0 or not DoesEntityExist(ped) or not DoesEntityExist(entry.obj) then
+                    local ped = remotePed(source)
+                    if not remoteHolds[source] or ped == 0 or not DoesEntityExist(ped)
+                        or not DoesEntityExist(entry.obj) then
                         removeRemoteProp(source)
                     end
                 end
-                -- Stamps outlive their prop by design - clearing one on stow would let a client
-                -- alternating hold/stow past the throttle - so they retire when the player leaves.
+                for source in pairs(remoteHolds) do syncRemoteProp(source) end
                 for source in pairs(remoteLastBuild) do
-                    if not remoteProps[source] and GetPlayerFromServerId(source) == -1 then
+                    if not remoteHolds[source] then
                         remoteLastBuild[source] = nil
                     end
                 end
