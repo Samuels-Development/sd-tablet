@@ -1,0 +1,10 @@
+{
+  "tablet": "Tablet",
+  "no_tablet": "Nemaš tablet.",
+  "cannot_connect": "Tablet se trenutačno ne može povezati.",
+  "cannot_use": "Trenutačno ne možeš koristiti tablet.",
+  "cannot_use_swimming": "Ne možeš koristiti tablet dok plivaš.",
+  "cannot_use_driving": "Ne možeš koristiti tablet dok voziš.",
+  "keybind_toggle": "Otvori/zatvori tablet",
+  "keybind_look": "Tablet: drži za pogled oko sebe"
+}
