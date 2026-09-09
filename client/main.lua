@@ -326,6 +326,33 @@ local function playPose()
     end)
 end
 
+---Puts the hold pose and a matching prop onto ANOTHER ped, and hands the prop back.
+---
+---For the stand-in sd-phone's MDT leaves behind while a dispatcher watches a camera: the officer
+---is stood there holding a tablet, so the copy has to be holding one too rather than appearing
+---empty-handed the moment somebody opens a feed.
+---
+---The prop is returned rather than tracked here, because it belongs to the ped the caller owns and
+---has to be deleted with it. This resource only ever tracks the player's own.
+---@param ped integer the ped to put the pose on
+---@return integer|nil prop the prop welded to it, for the caller to delete
+local function mirrorPoseOnto(ped)
+    if not shouldHold() then return nil end
+    if not ped or ped == 0 or not DoesEntityExist(ped) then return nil end
+
+    if pcall(lib.requestAnimDict, cfg.AnimDict, 1000) then
+        -- A plain looping FULL BODY clip, not the upper-body secondary the player gets. That one
+        -- blends over whatever the ped is already doing, and a stand-in that has just been cloned
+        -- and stood still has nothing underneath for it to blend onto, so it barely reads at all.
+        TaskPlayAnim(ped, cfg.AnimDict, cfg.AnimName, 8.0, -8.0, -1, 1, 0.0, false, false, false)
+        RemoveAnimDict(cfg.AnimDict)
+    end
+
+    return createProp(ped, currentColor)
+end
+
+exports('mirrorPoseOnto', mirrorPoseOnto)
+
 ---Stops our clip and removes the prop.
 local function stopPose()
     local ped = cache.ped
