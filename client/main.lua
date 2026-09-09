@@ -655,9 +655,11 @@ local function OpenAuthorisedTablet()
     mirror.arm(true)
     mirror.setCompanionOpen(true)
 
-    -- Integration so that the tablet works when “single SIM” mode is enabled and all information is stored on the SIM card
+    -- Under single-SIM the identity lives on the card rather than the character, so the tablet
+    -- has nothing to show until the phone pushes the current SIM across. sd-phone asks for the
+    -- same push when it opens; a companion device has to ask for itself.
     if simModeActive() then TriggerServerEvent('sd-phone:server:sim:requestPush') end
-    
+
     updatePose()
 
     SetNuiFocus(true, true)
@@ -1001,6 +1003,12 @@ if cfg.PropVisibleToOthers then
                     end
                 end
                 for source in pairs(remoteHolds) do syncRemoteProp(source) end
+                -- Stamps used to outlive a stow on purpose: while the holder wrote their own bag,
+                -- clearing one here let a client alternate hold/stow and rebuild past the
+                -- throttle. The server publishes now and paces each player's changes to
+                -- HOLD_MIN_INTERVAL, so the cheapest hold/stow/hold costs two of those windows -
+                -- longer than REMOTE_REBUILD_MIN, which is why retiring a stamp on stow can no
+                -- longer outrun it. Keep those two numbers in that relationship.
                 for source in pairs(remoteLastBuild) do
                     if not remoteHolds[source] then
                         remoteLastBuild[source] = nil
