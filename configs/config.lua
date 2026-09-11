@@ -12,6 +12,11 @@ local config = {
     -- unless you genuinely want the tablet in another language.
     Locale = 'en',
 
+    -- Keep the screen left-to-right even when the language reads right-to-left.
+    -- Arabic mirrors the whole interface by default, the way an Arabic iPad does.
+    -- Turn this on only if you want the old left-to-right layout with Arabic text.
+    ForceLeftToRight = false,
+
     -- Debug / dev logging toggle. Prints open/close and every refused or forwarded RPC.
     Debug  = false,
 

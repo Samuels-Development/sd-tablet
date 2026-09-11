@@ -538,6 +538,7 @@ local function openPayload()
     local apps, dock = visibleApps()
     return {
         locale              = config.Locale,
+        forceLtr            = config.ForceLeftToRight == true,
         locked              = tabletState.locked,
         battery             = tabletState.battery,
         carrier             = cfg.StatusBar.Carrier,
