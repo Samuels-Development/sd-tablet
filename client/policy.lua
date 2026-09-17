@@ -98,6 +98,8 @@ policy.LOCAL = {
 --                       closes us first anyway. exports['sd-tablet']:openApp is the tablet's.
 --   sd-phone:frameColor which coloured phone shell the player is holding. A tablet has no
 --                       variants; this would recolour a rail that isn't there.
+--   sd-phone:fold       the phone's hinge and its unfolded width. Landing here, it stretches the
+--                       tablet's screen to the phone's open width, off the edge of the display.
 --   sd-phone:admin:open the admin overlay, matching the DENY prefix above. It arrives with a
 --                       focus grab attached, so a half-built panel would strand the cursor; the
 --                       tablet closes for it instead (client/main.lua).
@@ -122,6 +124,7 @@ local DROP = {
     ['sd-phone:battery']      = true,
     ['sd-phone:launchApp']    = true,
     ['sd-phone:frameColor']   = true,
+    ['sd-phone:fold']         = true,
     ['sd-phone:admin:open']   = true,
     ['sd-phone:profileReset'] = true,
     ['sd-phone:wipe']         = true,
