@@ -1,0 +1,10 @@
+{
+    "tablet": "Tablet",
+    "no_tablet": "Não tens um tablet.",
+    "cannot_connect": "O tablet não consegue ligar-se agora.",
+    "cannot_use": "Não podes usar o tablet agora.",
+    "cannot_use_swimming": "Não podes usar o tablet enquanto nadas.",
+    "cannot_use_driving": "Não enquanto estiveres a conduzir.",
+    "keybind_toggle": "Abrir/fechar tablet",
+    "keybind_look": "Tablet: mantém premido para olhar em volta"
+}
