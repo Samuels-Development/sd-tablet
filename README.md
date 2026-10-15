@@ -16,7 +16,9 @@ If sd-tablet is useful to you, please ⭐ the repo. Issues and pull requests are
 ![Framework](https://img.shields.io/badge/Framework-QBCore%20%7C%20QBox%20%7C%20ESX-3b82f6)
 ![Database](https://img.shields.io/badge/Database-none%20of%20its%20own-3b82f6)
 
-[**sd-phone**](https://github.com/Samuels-Development/sd-phone) · [**Documentation**](https://docs.samueldev.shop/resources/phone/) · [**Store**](https://fivem.samueldev.shop) · [**Discord**](https://discord.gg/FzPehMQaBQ)
+[**Documentation**](https://docs.samueldev.shop/resources/phone/) · [**Store**](https://fivem.samueldev.shop) · [**Discord**](https://discord.gg/FzPehMQaBQ)
+
+**Works together:** [**sd-phone**](https://github.com/Samuels-Development/sd-phone) · **sd-tablet** · [**sd-computers**](https://github.com/Samuels-Development/sd-computers)
 
 </div>
 
