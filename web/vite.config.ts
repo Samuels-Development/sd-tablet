@@ -1,13 +1,29 @@
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // sd-phone's web/src IS the tablet UI — nothing is forked or copied. `@` points at that tree
 // where it lives and `@device` swaps in the profile it gets compiled against.
 const phoneRoot = fileURLToPath(new URL('../../sd-phone', import.meta.url));
 
+// Mirrors sd-phone/web/vite.config.ts: 3D models ride inside their importing chunk as data
+// URLs, because FiveM's NUI file server answers 404 for a .glb even when fxmanifest lists it,
+// and Vite 8's own `?inline` route cannot load the file on Windows.
+function inlineModels(): Plugin {
+    return {
+        name: 'sd-inline-models',
+        enforce: 'pre',
+        load(id) {
+            if (!id.endsWith('.glb')) return null;
+            const base64 = readFileSync(id).toString('base64');
+            return `export default ${JSON.stringify(`data:model/gltf-binary;base64,${base64}`)};`;
+        },
+    };
+}
+
 export default defineConfig({
-    plugins: [react()],
+    plugins: [inlineModels(), react()],
     base: './',
     resolve: {
         alias: {
