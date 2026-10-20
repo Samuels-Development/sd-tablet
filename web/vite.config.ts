@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+// The custom-app SDK, its types and the media uploader, built from sd-phone's source like the rest.
+import { sdkAssets } from '../../sd-phone/web/vite-plugin-sdk.ts';
 
 // sd-phone's web/src IS the tablet UI — nothing is forked or copied. `@` points at that tree
 // where it lives and `@device` swaps in the profile it gets compiled against.
@@ -23,7 +25,7 @@ function inlineModels(): Plugin {
 }
 
 export default defineConfig({
-    plugins: [inlineModels(), react()],
+    plugins: [inlineModels(), react(), sdkAssets()],
     base: './',
     resolve: {
         alias: {

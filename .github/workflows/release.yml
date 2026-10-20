@@ -59,8 +59,9 @@ jobs:
         working-directory: sd-phone/web
         run: npm ci
 
-      # `npm run build` runs sync:sdk first, which copies sd-phone's components.js in for
-      # the custom-app SDK. That is why the phone checkout has to land before this step.
+      # The build also writes the custom-app SDK, its types and the media uploader, from
+      # sd-phone's source through sd-phone/web/vite-plugin-sdk.ts. That is one more reason the
+      # phone checkout has to land before this step.
       - name: Build NUI
         working-directory: sd-tablet/web
         run: |

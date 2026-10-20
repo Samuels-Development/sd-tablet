@@ -21,5 +21,6 @@
     // place the tablet profile can go wrong. Its tests are not: they are sd-phone's to run, and
     // typing them would drag vitest into a project that only builds.
     "include": ["src", "device.ts", "../../sd-phone/web/src"],
-    "exclude": ["../../sd-phone/web/src/**/*.test.ts", "../../sd-phone/web/src/**/*.test.tsx"]
+    // The app SDK is checked on its own (sd-phone/web/src/sdk/tsconfig.json), against its contract.
+    "exclude": ["../../sd-phone/web/src/**/*.test.ts", "../../sd-phone/web/src/**/*.test.tsx", "../../sd-phone/web/src/sdk"]
 }
